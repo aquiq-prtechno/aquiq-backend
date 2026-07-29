@@ -19,6 +19,9 @@ const twilioClient = twilio(
   process.env.TWILIO_AUTH_TOKEN
 );
 
+const BACKEND_URL = process.env.BACKEND_URL || 'https://web-production-85fd6.up.railway.app';
+const JOB_TIMEOUT_MS = 3 * 60 * 1000; // 3 minutes
+
 // ─── Health Check ────────────────────────────────────────────────────────────
 app.get('/health', (req, res) => {
   res.json({ status: 'AQUIQ backend is running', timestamp: new Date().toISOString() });
@@ -26,14 +29,14 @@ app.get('/health', (req, res) => {
 
 // ─── Register Technician ─────────────────────────────────────────────────────
 app.post('/technician/register', async (req, res) => {
-  const { name, phone, pincode } = req.body;
+  const { name, phone, pincode, address } = req.body;
   if (!name || !phone || !pincode) {
     return res.status(400).json({ error: 'name, phone, pincode are required' });
   }
 
   const { data, error } = await supabase
     .from('technicians')
-    .insert([{ name, phone, pincode, is_available: true }])
+    .insert([{ name, phone, pincode, address: address || '', is_available: true }])
     .select()
     .single();
 
@@ -43,14 +46,14 @@ app.post('/technician/register', async (req, res) => {
 
 // ─── Register Customer ───────────────────────────────────────────────────────
 app.post('/customer/register', async (req, res) => {
-  const { name, phone, pincode, device_id, tds_threshold } = req.body;
+  const { name, phone, pincode, address, device_id, tds_threshold } = req.body;
   if (!name || !phone || !pincode || !device_id) {
     return res.status(400).json({ error: 'name, phone, pincode, device_id are required' });
   }
 
   const { data, error } = await supabase
     .from('customers')
-    .insert([{ name, phone, pincode, device_id, tds_threshold: tds_threshold || 150 }])
+    .insert([{ name, phone, pincode, address: address || '', device_id, tds_threshold: tds_threshold || 150 }])
     .select()
     .single();
 
@@ -58,13 +61,99 @@ app.post('/customer/register', async (req, res) => {
   res.json({ success: true, customer: data });
 });
 
+// ─── ESP32 Data Ingestion ─────────────────────────────────────────────────────
+// ESP32 sends: { device_id, tds_value, feed_tds, membrane_health, rejection_rate,
+//               output_flow, reject_flow, reject_ratio, pump_health, pump_current,
+//               temperature, total_volume_today }
+app.post('/data', async (req, res) => {
+  try {
+    const {
+      device_id,
+      tds_value,
+      feed_tds,
+      membrane_health,
+      rejection_rate,
+      output_flow,
+      reject_flow,
+      reject_ratio,
+      pump_health,
+      pump_current,
+      temperature,
+      total_volume_today,
+    } = req.body;
+
+    if (!device_id) return res.status(400).json({ error: 'device_id required' });
+
+    console.log(`[AQUIQ] Data from ${device_id}: TDS=${tds_value}`);
+
+    const sensor_data = {
+      feed_tds: feed_tds ?? null,
+      membrane_health: membrane_health ?? null,
+      rejection_rate: rejection_rate ?? null,
+      output_flow: output_flow ?? null,
+      reject_flow: reject_flow ?? null,
+      reject_ratio: reject_ratio ?? null,
+      pump_health: pump_health ?? null,
+      pump_current: pump_current ?? null,
+      temperature: temperature ?? null,
+      total_volume_today: total_volume_today ?? null,
+    };
+
+    const { data: customer, error: custErr } = await supabase
+      .from('customers')
+      .update({
+        last_tds: tds_value ?? null,
+        sensor_data,
+        last_seen: new Date().toISOString(),
+      })
+      .eq('device_id', device_id)
+      .select()
+      .single();
+
+    if (custErr || !customer) {
+      return res.status(404).json({ error: 'Device not found' });
+    }
+
+    // Trigger alert if TDS exceeded
+    if (tds_value && parseInt(tds_value) > customer.tds_threshold) {
+      console.log(`[AQUIQ] TDS exceeded on ${device_id}: ${tds_value} > ${customer.tds_threshold}`);
+      // Check no active job already exists for this device
+      const { data: existingJobs } = await supabase
+        .from('jobs')
+        .select('id')
+        .eq('customer_id', customer.id)
+        .in('status', ['searching', 'pending', 'accepted'])
+        .limit(1);
+
+      if (!existingJobs || existingJobs.length === 0) {
+        // Create job and dispatch (fire-and-forget)
+        supabase.from('jobs').insert([{
+          customer_id: customer.id,
+          location_id: customer.location_id,
+          company_id: customer.company_id,
+          tds_value: parseInt(tds_value),
+          status: 'searching',
+          expires_at: new Date(Date.now() + JOB_TIMEOUT_MS).toISOString(),
+        }]).select().single().then(({ data: job }) => {
+          if (job) dispatchTechnician(job.id, customer, parseInt(tds_value));
+        });
+      }
+    }
+
+    res.json({ success: true, device_id, tds: tds_value });
+  } catch (err) {
+    console.error('[AQUIQ] /data error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── Blynk Webhook — TDS Alert ───────────────────────────────────────────────
 app.post('/webhook/blynk', async (req, res) => {
   try {
     const { device_id, tds_value } = req.body;
-    console.log(`[AQUIQ] TDS Alert received — device: ${device_id}, TDS: ${tds_value} ppm`);
+    console.log(`[AQUIQ] TDS Alert — device: ${device_id}, TDS: ${tds_value} ppm`);
 
-    // 1. Find customer by device_id
+    // 1. Find customer
     const { data: customer, error: custErr } = await supabase
       .from('customers')
       .select('*')
@@ -72,90 +161,39 @@ app.post('/webhook/blynk', async (req, res) => {
       .single();
 
     if (custErr || !customer) {
-      console.log('[AQUIQ] Customer not found for device:', device_id);
       return res.status(404).json({ error: 'Customer not found' });
     }
 
-    // 2. Check if TDS exceeds threshold
+    // 2. Check threshold
     if (parseInt(tds_value) <= customer.tds_threshold) {
-      console.log(`[AQUIQ] TDS ${tds_value} is within threshold ${customer.tds_threshold} — no action`);
       return res.json({ status: 'TDS within threshold, no action needed' });
     }
 
-    // 3. Find nearest available technician — same pincode first
-    let { data: technician } = await supabase
-      .from('technicians')
-      .select('*')
-      .eq('pincode', customer.pincode)
-      .eq('is_available', true)
-      .limit(1)
-      .single();
-
-    // Fallback: any available technician
-    if (!technician) {
-      const { data: anyTech } = await supabase
-        .from('technicians')
-        .select('*')
-        .eq('is_available', true)
-        .limit(1)
-        .single();
-      technician = anyTech;
-    }
-
-    if (!technician) {
-      console.log('[AQUIQ] No technician available right now');
-      // Still notify customer
-      await sendWhatsApp(
-        customer.phone,
-        `🚨 AQUIQ Alert: Your RO water TDS is ${tds_value} ppm (your limit: ${customer.tds_threshold} ppm). We are finding a technician for you. Please wait.`
-      );
-      return res.json({ status: 'No technician available, customer notified' });
-    }
-
-    // 4. Create job record
+    // 3. Create job first
     const { data: job, error: jobErr } = await supabase
       .from('jobs')
       .insert([{
         customer_id: customer.id,
-        technician_id: technician.id,
         tds_value: parseInt(tds_value),
-        status: 'pending'
+        status: 'searching',
+        expires_at: new Date(Date.now() + JOB_TIMEOUT_MS).toISOString()
       }])
       .select()
       .single();
 
     if (jobErr) throw new Error(jobErr.message);
 
-    // 5. Generate Cashfree payment link
-    const paymentLink = await createCashfreePaymentLink(job.id, customer);
-
-    // 6. Update job with payment link
-    await supabase
-      .from('jobs')
-      .update({ payment_link: paymentLink })
-      .eq('id', job.id);
-
-    // 7. Mark technician as unavailable
-    await supabase
-      .from('technicians')
-      .update({ is_available: false })
-      .eq('id', technician.id);
-
-    // 8. WhatsApp to technician
-    const acceptUrl = `${process.env.BACKEND_URL || 'https://aquiq-backend.up.railway.app'}/technician/accept/${job.id}`;
-    await sendWhatsApp(
-      technician.phone,
-      `🔧 *New AQUIQ Job!*\n\nCustomer: ${customer.name}\nLocation Pincode: ${customer.pincode}\nTDS Level: *${tds_value} ppm* (High!)\n\nReply YES or click to accept:\n${acceptUrl}\n\n— AQUIQ by PR TECHNO`
-    );
-
-    // 9. WhatsApp to customer
+    // 4. Notify customer we are searching
     await sendWhatsApp(
       customer.phone,
-      `✅ *AQUIQ Alert*\n\nYour RO TDS is *${tds_value} ppm* (limit: ${customer.tds_threshold} ppm).\n\nTechnician *${technician.name}* is on the way!\n\nPlease pay the service charge:\n${paymentLink}\n\n— AQUIQ by PR TECHNO`
+      `🚨 *AQUIQ Alert*\n\nYour RO water TDS is *${tds_value} ppm* (your limit: ${customer.tds_threshold} ppm).\n\n🔍 Finding nearest technician for you...\n\n— AQUIQ™ by PR TECHNO`
     );
 
-    console.log(`[AQUIQ] Job ${job.id} created — Technician ${technician.name} dispatched`);
-    res.json({ success: true, job_id: job.id, technician: technician.name });
+    // 5. Start technician search
+    res.json({ success: true, job_id: job.id, status: 'searching' });
+
+    // Run dispatch asynchronously
+    dispatchTechnician(job.id, customer, parseInt(tds_value));
 
   } catch (err) {
     console.error('[AQUIQ] Webhook error:', err.message);
@@ -163,9 +201,125 @@ app.post('/webhook/blynk', async (req, res) => {
   }
 });
 
-// ─── Technician Accepts Job ──────────────────────────────────────────────────
+// ─── Dispatch Technician (with timeout & retry) ───────────────────────────────
+async function dispatchTechnician(jobId, customer, tdsValue, excludeIds = []) {
+  console.log(`[AQUIQ] Searching technician for job ${jobId}, excluding: ${excludeIds}`);
+
+  // Find available technician — same pincode first
+  let query = supabase
+    .from('technicians')
+    .select('*')
+    .eq('is_available', true);
+
+  if (excludeIds.length > 0) {
+    query = query.not('id', 'in', `(${excludeIds.join(',')})`);
+  }
+
+  // Try same pincode first
+  let { data: technician } = await query
+    .eq('pincode', customer.pincode)
+    .limit(1)
+    .single();
+
+  // Fallback: any available technician
+  if (!technician) {
+    let fallbackQuery = supabase
+      .from('technicians')
+      .select('*')
+      .eq('is_available', true);
+
+    if (excludeIds.length > 0) {
+      fallbackQuery = fallbackQuery.not('id', 'in', `(${excludeIds.join(',')})`);
+    }
+
+    const { data: anyTech } = await fallbackQuery.limit(1).single();
+    technician = anyTech;
+  }
+
+  if (!technician) {
+    console.log('[AQUIQ] No technician available for job', jobId);
+    await supabase.from('jobs').update({ status: 'no_technician' }).eq('id', jobId);
+    await sendWhatsApp(
+      customer.phone,
+      `😔 *AQUIQ Update*\n\nSorry, no technician is available right now for pincode ${customer.pincode}.\n\nWe will notify you as soon as one is available.\n\n— AQUIQ™ by PR TECHNO`
+    );
+    return;
+  }
+
+  // Assign technician to job
+  await supabase
+    .from('jobs')
+    .update({ technician_id: technician.id, status: 'pending' })
+    .eq('id', jobId);
+
+  // Mark technician unavailable
+  await supabase
+    .from('technicians')
+    .update({ is_available: false })
+    .eq('id', technician.id);
+
+  const acceptUrl = `${BACKEND_URL}/technician/accept/${jobId}`;
+  const mapsUrl = `https://maps.google.com/?q=${encodeURIComponent(customer.address || customer.pincode + ', India')}`;
+
+  // Send WhatsApp to technician
+  await sendWhatsApp(
+    technician.phone,
+    `🔧 *New AQUIQ Job!*\n\n👤 Customer: ${customer.name}\n🏠 Address: ${customer.address || 'Pincode: ' + customer.pincode}\n📮 Pincode: ${customer.pincode}\n💧 TDS Level: *${tdsValue} ppm* (HIGH! Limit: ${customer.tds_threshold} ppm)\n\n⏰ *You have 3 minutes to accept!*\n\n✅ Accept Job:\n${acceptUrl}\n\n💰 You will earn: ₹400 after AQUIQ commission\n\n— AQUIQ™ by PR TECHNO`
+  );
+
+  console.log(`[AQUIQ] Job ${jobId} — Technician ${technician.name} dispatched, waiting 3 min`);
+
+  // Wait 3 minutes then check if accepted
+  setTimeout(async () => {
+    const { data: updatedJob } = await supabase
+      .from('jobs')
+      .select('*')
+      .eq('id', jobId)
+      .single();
+
+    if (updatedJob && updatedJob.status === 'pending') {
+      console.log(`[AQUIQ] Job ${jobId} — Technician ${technician.name} did not respond. Searching next...`);
+
+      // Free technician back
+      await supabase
+        .from('technicians')
+        .update({ is_available: true })
+        .eq('id', technician.id);
+
+      // Notify customer
+      await sendWhatsApp(
+        customer.phone,
+        `🔄 *AQUIQ Update*\n\nTechnician ${technician.name} did not respond.\n\nSearching next available technician...\n\n— AQUIQ™ by PR TECHNO`
+      );
+
+      // Try next technician
+      dispatchTechnician(jobId, customer, tdsValue, [...excludeIds, technician.id]);
+    }
+  }, JOB_TIMEOUT_MS);
+}
+
+// ─── Technician Accepts Job (GET — from WhatsApp link click) ─────────────────
+app.get('/technician/accept/:jobId', async (req, res) => {
+  return acceptJob(req, res);
+});
+
 app.post('/technician/accept/:jobId', async (req, res) => {
+  return acceptJob(req, res);
+});
+
+async function acceptJob(req, res) {
   const { jobId } = req.params;
+
+  // Check job is still pending
+  const { data: currentJob } = await supabase
+    .from('jobs')
+    .select('*')
+    .eq('id', jobId)
+    .single();
+
+  if (!currentJob || currentJob.status !== 'pending') {
+    return res.send(`<h2>Sorry, this job is no longer available.</h2>`);
+  }
 
   const { data: job, error } = await supabase
     .from('jobs')
@@ -176,16 +330,25 @@ app.post('/technician/accept/:jobId', async (req, res) => {
 
   if (error) return res.status(500).json({ error: error.message });
 
-  // Notify customer that technician confirmed
-  if (job.customers) {
+  const customer = job.customers;
+  const technician = job.technicians;
+
+  if (customer) {
+    const paymentLink = await createCashfreePaymentLink(jobId, customer);
+    const mapsUrl = `https://maps.google.com/?q=${encodeURIComponent(customer.address || customer.pincode + ', India')}`;
+
+    // Send customer the map + payment
     await sendWhatsApp(
-      job.customers.phone,
-      `✅ *AQUIQ Update*\n\nTechnician *${job.technicians?.name}* has accepted your job and is coming.\n\nDon't forget to make the payment:\n${job.payment_link}\n\n— AQUIQ by PR TECHNO`
+      customer.phone,
+      `✅ *AQUIQ — Technician Confirmed!*\n\n🔧 Technician *${technician?.name}* has accepted your job and is on the way!\n\n🗺 Your location shared with technician:\n${mapsUrl}\n\n💳 Please pay service charge:\n${paymentLink}\n\n— AQUIQ™ by PR TECHNO`
     );
+
+    // Update job with payment link
+    await supabase.from('jobs').update({ payment_link: paymentLink }).eq('id', jobId);
   }
 
-  res.json({ success: true, message: 'Job accepted', job });
-});
+  res.send(`<h2 style="font-family:sans-serif;color:green;">✅ Job Accepted! Head to customer location.</h2><p style="font-family:sans-serif;">Customer: ${customer?.name} | Pincode: ${customer?.pincode}</p>`);
+}
 
 // ─── List All Jobs (Admin) ───────────────────────────────────────────────────
 app.get('/jobs', async (req, res) => {
@@ -241,7 +404,7 @@ async function createCashfreePaymentLink(jobId, customer) {
     return response.data.link_url;
   } catch (err) {
     console.error('[AQUIQ] Cashfree payment link failed:', err.message);
-    return 'https://aquiq.in/pay/' + jobId;
+    return `${BACKEND_URL}/pay/${jobId}`;
   }
 }
 
