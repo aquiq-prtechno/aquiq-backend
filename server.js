@@ -4,6 +4,7 @@ const cors = require('cors');
 const { createClient } = require('@supabase/supabase-js');
 const twilio = require('twilio');
 const axios = require('axios');
+const cron = require('node-cron');
 
 const app = express();
 app.use(cors());
@@ -536,8 +537,160 @@ async function createCashfreePaymentLink(jobId, customer) {
   }
 }
 
+// ─── Predictive Maintenance ───────────────────────────────────────────────────
+
+// Linear regression: returns { slope, intercept, r2 }
+function linearRegression(points) {
+  const n = points.length;
+  if (n < 2) return null;
+  const sumX = points.reduce((a, p) => a + p.x, 0);
+  const sumY = points.reduce((a, p) => a + p.y, 0);
+  const sumXY = points.reduce((a, p) => a + p.x * p.y, 0);
+  const sumXX = points.reduce((a, p) => a + p.x * p.x, 0);
+  const slope = (n * sumXY - sumX * sumY) / (n * sumXX - sumX * sumX);
+  const intercept = (sumY - slope * sumX) / n;
+  const meanY = sumY / n;
+  const ssTot = points.reduce((a, p) => a + Math.pow(p.y - meanY, 2), 0);
+  const ssRes = points.reduce((a, p) => a + Math.pow(p.y - (slope * p.x + intercept), 2), 0);
+  const r2 = ssTot === 0 ? 1 : 1 - ssRes / ssTot;
+  return { slope, intercept, r2 };
+}
+
+async function runPredictiveMaintenance() {
+  console.log('[AQUIQ] Running predictive maintenance analysis...');
+  try {
+    const { data: customers } = await supabase
+      .from('customers')
+      .select('id, device_id, name, tds_threshold, push_token');
+
+    if (!customers?.length) return;
+
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+
+    for (const customer of customers) {
+      try {
+        const { data: history } = await supabase
+          .from('sensor_history')
+          .select('recorded_at, output_tds, membrane_health, pump_health')
+          .eq('device_id', customer.id)
+          .gte('recorded_at', thirtyDaysAgo)
+          .order('recorded_at', { ascending: true });
+
+        if (!history || history.length < 7) continue; // need at least 7 data points
+
+        const threshold = customer.tds_threshold || 150;
+        const now = Date.now();
+
+        // Convert timestamps to days-from-first-reading for regression
+        const t0 = new Date(history[0].recorded_at).getTime();
+        const tdsPoints = history
+          .filter(r => r.output_tds != null)
+          .map(r => ({ x: (new Date(r.recorded_at).getTime() - t0) / (24 * 60 * 60 * 1000), y: r.output_tds }));
+
+        const memPoints = history
+          .filter(r => r.membrane_health != null)
+          .map(r => ({ x: (new Date(r.recorded_at).getTime() - t0) / (24 * 60 * 60 * 1000), y: r.membrane_health }));
+
+        const tdsTrend = linearRegression(tdsPoints);
+        const memTrend = linearRegression(memPoints);
+
+        // Days since first reading
+        const daysSinceFirst = (now - t0) / (24 * 60 * 60 * 1000);
+        const currentTds = tdsPoints[tdsPoints.length - 1]?.y ?? null;
+        const currentMem = memPoints[memPoints.length - 1]?.y ?? null;
+
+        let prediction = null;
+
+        // TDS prediction: when will TDS hit the threshold?
+        if (tdsTrend && tdsTrend.slope > 0 && tdsTrend.r2 > 0.3 && currentTds != null) {
+          const daysToThreshold = (threshold - tdsTrend.intercept - tdsTrend.slope * daysSinceFirst) / tdsTrend.slope;
+          if (daysToThreshold > 0 && daysToThreshold < 90) {
+            const predictedDate = new Date(now + daysToThreshold * 24 * 60 * 60 * 1000);
+            const urgency = daysToThreshold <= 7 ? 'critical' : daysToThreshold <= 21 ? 'warning' : 'info';
+            prediction = {
+              type: 'tds_rising',
+              predicted_failure_date: predictedDate.toISOString(),
+              days_remaining: Math.round(daysToThreshold),
+              current_tds: Math.round(currentTds),
+              tds_threshold: threshold,
+              tds_slope_per_day: Math.round(tdsTrend.slope * 10) / 10,
+              r2: Math.round(tdsTrend.r2 * 100) / 100,
+              urgency,
+              message: `TDS rising ${tdsTrend.slope.toFixed(1)} ppm/day. Predicted to exceed ${threshold}ppm in ${Math.round(daysToThreshold)} days (${predictedDate.toLocaleDateString('en-IN')}).`,
+            };
+          }
+        }
+
+        // Membrane prediction: if health declining steeply
+        if (!prediction && memTrend && memTrend.slope < -0.3 && memTrend.r2 > 0.3 && currentMem != null) {
+          const daysTo40 = (40 - (memTrend.intercept + memTrend.slope * daysSinceFirst)) / memTrend.slope;
+          if (daysTo40 > 0 && daysTo40 < 90) {
+            const predictedDate = new Date(now + daysTo40 * 24 * 60 * 60 * 1000);
+            const urgency = daysTo40 <= 7 ? 'critical' : daysTo40 <= 21 ? 'warning' : 'info';
+            prediction = {
+              type: 'membrane_degrading',
+              predicted_failure_date: predictedDate.toISOString(),
+              days_remaining: Math.round(daysTo40),
+              current_membrane: Math.round(currentMem),
+              membrane_slope_per_day: Math.round(memTrend.slope * 10) / 10,
+              r2: Math.round(memTrend.r2 * 100) / 100,
+              urgency,
+              message: `Membrane degrading ${Math.abs(memTrend.slope).toFixed(1)}%/day. Predicted to reach critical level in ${Math.round(daysTo40)} days (${predictedDate.toLocaleDateString('en-IN')}).`,
+            };
+          }
+        }
+
+        // System healthy — no prediction needed
+        if (!prediction) {
+          prediction = {
+            type: 'healthy',
+            urgency: 'good',
+            message: 'System trending stable. No service predicted in next 90 days.',
+            analyzed_at: new Date().toISOString(),
+          };
+        } else {
+          prediction.analyzed_at = new Date().toISOString();
+        }
+
+        // Save prediction to customers table
+        await supabase
+          .from('customers')
+          .update({ maintenance_prediction: prediction })
+          .eq('id', customer.id);
+
+        console.log(`[AQUIQ] Prediction for ${customer.device_id}: ${prediction.urgency} — ${prediction.message}`);
+
+        // Send push alert if urgent or critical
+        if (customer.push_token && (prediction.urgency === 'critical' || prediction.urgency === 'warning')) {
+          await sendPushNotification(
+            customer.push_token,
+            prediction.urgency === 'critical' ? '🚨 Service Required Soon' : '🔧 Maintenance Alert',
+            prediction.message
+          );
+        }
+      } catch (err) {
+        console.error(`[AQUIQ] Prediction error for ${customer.device_id}:`, err.message);
+      }
+    }
+    console.log('[AQUIQ] Predictive maintenance analysis complete.');
+  } catch (err) {
+    console.error('[AQUIQ] Predictive maintenance failed:', err.message);
+  }
+}
+
+// Manual trigger endpoint (for testing)
+app.get('/admin/predict', async (req, res) => {
+  await runPredictiveMaintenance();
+  res.json({ success: true, message: 'Prediction run complete' });
+});
+
+// Run every Monday at 6 AM IST (00:30 UTC)
+cron.schedule('30 0 * * 1', runPredictiveMaintenance);
+
 // ─── Start Server ─────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`AQUIQ Backend running on port ${PORT}`);
+  // Run once on startup so prediction is available immediately
+  runPredictiveMaintenance();
 });
