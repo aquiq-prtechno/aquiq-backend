@@ -140,12 +140,140 @@ app.post('/data', async (req, res) => {
       }
     }
 
+    // Anomaly detection — run asynchronously after sending response
+    detectAnomalies(customer, {
+      output_tds: tds_value, feed_tds, membrane_health, rejection_rate,
+      output_flow, pump_health, pump_current, temperature,
+    });
+
     res.json({ success: true, device_id, tds: tds_value });
   } catch (err) {
     console.error('[AQUIQ] /data error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
+
+// ─── Anomaly Detection ────────────────────────────────────────────────────────
+async function detectAnomalies(customer, current) {
+  try {
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const { data: history } = await supabase
+      .from('sensor_history')
+      .select('output_tds, membrane_health, output_flow, pump_health')
+      .eq('device_id', customer.id)
+      .gte('recorded_at', sevenDaysAgo);
+
+    if (!history || history.length < 6) return;
+
+    const checks = [
+      { key: 'output_tds',      label: 'TDS',             unit: 'ppm' },
+      { key: 'membrane_health', label: 'Membrane Health',  unit: '%'   },
+      { key: 'output_flow',     label: 'Output Flow',      unit: 'L/min' },
+      { key: 'pump_health',     label: 'Pump Health',      unit: '%'   },
+    ];
+
+    const anomalies = [];
+
+    for (const check of checks) {
+      const currentVal = current[check.key];
+      if (currentVal == null) continue;
+
+      const vals = history.map(r => r[check.key]).filter(v => v != null);
+      if (vals.length < 4) continue;
+
+      const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
+      const std = Math.sqrt(vals.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / vals.length);
+      const normalMin = mean - 2.5 * std;
+      const normalMax = mean + 2.5 * std;
+
+      let isAnomaly = false;
+      let severity = 'warning';
+      let message = '';
+
+      if (currentVal > normalMax) {
+        isAnomaly = true;
+        severity = currentVal > mean + 4 * std ? 'critical' : 'warning';
+        message = `${check.label} spike: ${currentVal}${check.unit} (normal max: ${Math.round(normalMax)}${check.unit})`;
+      } else if (currentVal < normalMin) {
+        isAnomaly = true;
+        severity = currentVal < mean - 4 * std ? 'critical' : 'warning';
+        message = `${check.label} drop: ${currentVal}${check.unit} (normal min: ${Math.round(normalMin)}${check.unit})`;
+      }
+
+      // TDS above customer threshold is always critical
+      if (check.key === 'output_tds' && currentVal > customer.tds_threshold) {
+        isAnomaly = true;
+        severity = 'critical';
+        message = `TDS exceeded limit: ${currentVal}ppm (your limit: ${customer.tds_threshold}ppm)`;
+      }
+
+      // Sudden >30% shift from last snapshot
+      const lastVal = vals[vals.length - 1];
+      if (lastVal && Math.abs(currentVal - lastVal) / lastVal > 0.3) {
+        isAnomaly = true;
+        severity = 'warning';
+        message = `Sudden ${check.label} change: ${lastVal}→${currentVal}${check.unit} (${Math.round(Math.abs(currentVal - lastVal) / lastVal * 100)}% shift)`;
+      }
+
+      if (!isAnomaly) continue;
+
+      // Avoid duplicates — skip if same sensor anomaly exists in last 2 hours
+      const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+      const { data: existing } = await supabase
+        .from('anomalies')
+        .select('id')
+        .eq('device_id', customer.id)
+        .eq('sensor', check.key)
+        .gte('detected_at', twoHoursAgo)
+        .limit(1);
+
+      if (!existing?.length) {
+        anomalies.push({
+          device_id: customer.id,
+          sensor: check.key,
+          current_value: currentVal,
+          normal_min: Math.round(normalMin * 10) / 10,
+          normal_max: Math.round(normalMax * 10) / 10,
+          severity,
+          message,
+        });
+      }
+    }
+
+    if (!anomalies.length) return;
+
+    await supabase.from('anomalies').insert(anomalies);
+    console.log(`[AQUIQ] ${anomalies.length} anomaly(s) detected for device ${customer.device_id}`);
+
+    if (customer.push_token) {
+      for (const anomaly of anomalies) {
+        await sendPushNotification(
+          customer.push_token,
+          anomaly.severity === 'critical' ? '🚨 AQUIQ Critical Alert' : '⚠️ AQUIQ Warning',
+          anomaly.message
+        );
+      }
+    }
+  } catch (err) {
+    console.error('[AQUIQ] Anomaly detection error:', err.message);
+  }
+}
+
+async function sendPushNotification(token, title, body) {
+  try {
+    await axios.post('https://exp.host/--/api/v2/push/send', {
+      to: token,
+      title,
+      body,
+      sound: 'default',
+      priority: 'high',
+      data: { type: 'anomaly' },
+    }, { headers: { 'Content-Type': 'application/json' } });
+    console.log('[AQUIQ] Push notification sent');
+  } catch (err) {
+    console.error('[AQUIQ] Push notification failed:', err.message);
+  }
+}
 
 // ─── Blynk Webhook — TDS Alert ───────────────────────────────────────────────
 app.post('/webhook/blynk', async (req, res) => {
