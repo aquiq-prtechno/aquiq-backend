@@ -70,7 +70,8 @@ app.post('/data', async (req, res) => {
   try {
     const {
       device_id,
-      tds_value,
+      tds_value: tds_value_raw,
+      tds,
       feed_tds,
       membrane_health,
       rejection_rate,
@@ -82,6 +83,8 @@ app.post('/data', async (req, res) => {
       temperature,
       total_volume_today,
     } = req.body;
+
+    const tds_value = tds_value_raw ?? tds ?? null;
 
     if (!device_id) return res.status(400).json({ error: 'device_id required' });
 
