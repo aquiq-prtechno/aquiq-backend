@@ -115,6 +115,7 @@ app.post('/data', async (req, res) => {
       .single();
 
     if (custErr || !customer) {
+      console.error(`[AQUIQ] DB error for ${device_id}:`, JSON.stringify(custErr));
       return res.status(404).json({ error: 'Device not found' });
     }
 
