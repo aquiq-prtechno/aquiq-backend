@@ -155,7 +155,7 @@ async function sendOTPEmail(toEmail, otp, name) {
 
           <div style="font-size:10px;color:#1e2d3d;line-height:1.8;">
             This email was sent to <span style="color:#2a4060;">${toEmail}</span><br/>
-            Sent at ${time} IST · do-not-reply@prtechno.in<br/>
+            Sent at ${time} IST · noreply@prtechno.in<br/>
             ⚠️ Please do not reply to this email — this mailbox is not monitored.<br/>
             © ${year} PR TECHNO. All rights reserved.
           </div>
@@ -170,7 +170,7 @@ async function sendOTPEmail(toEmail, otp, name) {
 </html>`;
 
   await mailer.sendMail({
-    from: '"AQUIQ™ by PR TECHNO" <do-not-reply@prtechno.in>',
+    from: '"AQUIQ™ by PR TECHNO" <noreply@prtechno.in>',
     to: toEmail,
     subject: `${otp} — Your AQUIQ Password Reset OTP (valid 10 min)`,
     html,
