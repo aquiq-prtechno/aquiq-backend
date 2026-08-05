@@ -2,7 +2,6 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const { createClient } = require('@supabase/supabase-js');
-const twilio = require('twilio');
 const axios = require('axios');
 const cron = require('node-cron');
 const nodemailer = require('nodemailer');
@@ -16,17 +15,6 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY
 );
 
-// Twilio — lazy init so missing creds don't crash the server at startup
-let twilioClient = null;
-function getTwilio() {
-  if (!twilioClient) {
-    twilioClient = twilio(
-      process.env.TWILIO_ACCOUNT_SID,
-      process.env.TWILIO_AUTH_TOKEN
-    );
-  }
-  return twilioClient;
-}
 
 const BACKEND_URL = process.env.BACKEND_URL || 'https://web-production-85fd6.up.railway.app';
 const JOB_TIMEOUT_MS = 3 * 60 * 1000; // 3 minutes
@@ -584,13 +572,7 @@ app.post('/webhook/blynk', async (req, res) => {
 
     if (jobErr) throw new Error(jobErr.message);
 
-    // 4. Notify customer we are searching
-    await sendWhatsApp(
-      customer.phone,
-      `🚨 *AQUIQ Alert*\n\nYour RO water TDS is *${tds_value} ppm* (your limit: ${customer.tds_threshold} ppm).\n\n🔍 Finding nearest technician for you...\n\n— AQUIQ™ by PR TECHNO`
-    );
-
-    // 5. Start technician search
+    // 4. Start technician search
     res.json({ success: true, job_id: job.id, status: 'searching' });
 
     // Run dispatch asynchronously
@@ -640,10 +622,6 @@ async function dispatchTechnician(jobId, customer, tdsValue, excludeIds = []) {
   if (!technician) {
     console.log('[AQUIQ] No technician available for job', jobId);
     await supabase.from('jobs').update({ status: 'no_technician' }).eq('id', jobId);
-    await sendWhatsApp(
-      customer.phone,
-      `😔 *AQUIQ Update*\n\nSorry, no technician is available right now for pincode ${customer.pincode}.\n\nWe will notify you as soon as one is available.\n\n— AQUIQ™ by PR TECHNO`
-    );
     return;
   }
 
@@ -661,12 +639,6 @@ async function dispatchTechnician(jobId, customer, tdsValue, excludeIds = []) {
 
   const acceptUrl = `${BACKEND_URL}/technician/accept/${jobId}`;
   const mapsUrl = `https://maps.google.com/?q=${encodeURIComponent(customer.address || customer.pincode + ', India')}`;
-
-  // Send WhatsApp to technician
-  await sendWhatsApp(
-    technician.phone,
-    `🔧 *New AQUIQ Job!*\n\n👤 Customer: ${customer.name}\n🏠 Address: ${customer.address || 'Pincode: ' + customer.pincode}\n📮 Pincode: ${customer.pincode}\n💧 TDS Level: *${tdsValue} ppm* (HIGH! Limit: ${customer.tds_threshold} ppm)\n\n⏰ *You have 3 minutes to accept!*\n\n✅ Accept Job:\n${acceptUrl}\n\n💰 You will earn: ₹400 after AQUIQ commission\n\n— AQUIQ™ by PR TECHNO`
-  );
 
   console.log(`[AQUIQ] Job ${jobId} — Technician ${technician.name} dispatched, waiting 3 min`);
 
@@ -686,12 +658,6 @@ async function dispatchTechnician(jobId, customer, tdsValue, excludeIds = []) {
         .from('technicians')
         .update({ is_available: true })
         .eq('id', technician.id);
-
-      // Notify customer
-      await sendWhatsApp(
-        customer.phone,
-        `🔄 *AQUIQ Update*\n\nTechnician ${technician.name} did not respond.\n\nSearching next available technician...\n\n— AQUIQ™ by PR TECHNO`
-      );
 
       // Try next technician
       dispatchTechnician(jobId, customer, tdsValue, [...excludeIds, technician.id]);
@@ -738,12 +704,6 @@ async function acceptJob(req, res) {
     const paymentLink = await createCashfreePaymentLink(jobId, customer);
     const mapsUrl = `https://maps.google.com/?q=${encodeURIComponent(customer.address || customer.pincode + ', India')}`;
 
-    // Send customer the map + payment
-    await sendWhatsApp(
-      customer.phone,
-      `✅ *AQUIQ — Technician Confirmed!*\n\n🔧 Technician *${technician?.name}* has accepted your job and is on the way!\n\n🗺 Your location shared with technician:\n${mapsUrl}\n\n💳 Please pay service charge:\n${paymentLink}\n\n— AQUIQ™ by PR TECHNO`
-    );
-
     // Update job with payment link
     await supabase.from('jobs').update({ payment_link: paymentLink }).eq('id', jobId);
   }
@@ -763,19 +723,6 @@ app.get('/jobs', async (req, res) => {
 });
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-async function sendWhatsApp(to, message) {
-  try {
-    const toFormatted = to.startsWith('whatsapp:') ? to : `whatsapp:+91${to.replace(/^0/, '')}`;
-    await getTwilio().messages.create({
-      from: process.env.TWILIO_WHATSAPP_FROM,
-      to: toFormatted,
-      body: message
-    });
-    console.log(`[AQUIQ] WhatsApp sent to ${toFormatted}`);
-  } catch (err) {
-    console.error(`[AQUIQ] WhatsApp failed to ${to}:`, err.message);
-  }
-}
 
 async function createCashfreePaymentLink(jobId, customer) {
   try {
