@@ -119,6 +119,22 @@ app.post('/data', async (req, res) => {
       return res.status(404).json({ error: 'Device not found' });
     }
 
+    // Insert into sensor_history for reports & anomaly detection
+    supabase.from('sensor_history').insert([{
+      device_id: customer.id,
+      output_tds: tds_value ?? null,
+      feed_tds: feed_tds ?? null,
+      membrane_health: membrane_health ?? null,
+      rejection_rate: rejection_rate ?? null,
+      output_flow: output_flow ?? null,
+      pump_health: pump_health ?? null,
+      pump_current: pump_current ?? null,
+      temperature: temperature ?? null,
+      total_volume_today: total_volume_today ?? null,
+    }]).then(({ error: histErr }) => {
+      if (histErr) console.error('[AQUIQ] History insert error:', histErr.message);
+    });
+
     // Trigger alert if TDS exceeded
     if (tds_value && parseInt(tds_value) > customer.tds_threshold) {
       console.log(`[AQUIQ] TDS exceeded on ${device_id}: ${tds_value} > ${customer.tds_threshold}`);
