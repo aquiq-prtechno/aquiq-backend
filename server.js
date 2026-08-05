@@ -25,11 +25,15 @@ const BACKEND_URL = process.env.BACKEND_URL || 'https://web-production-85fd6.up.
 const JOB_TIMEOUT_MS = 3 * 60 * 1000; // 3 minutes
 
 // ─── Email Transporter ────────────────────────────────────────────────────────
+// Works with any email provider — custom domain, Zoho, Outlook, Gmail, etc.
+// Set EMAIL_HOST, EMAIL_USER, EMAIL_PASS in Railway env vars
 const mailer = nodemailer.createTransport({
-  service: 'gmail',
+  host: process.env.EMAIL_HOST || 'smtp.gmail.com',  // e.g. mail.prtechno.in
+  port: parseInt(process.env.EMAIL_PORT || '465'),
+  secure: process.env.EMAIL_PORT !== '587',           // true for 465, false for 587
   auth: {
-    user: process.env.EMAIL_USER,   // e.g. aquiq@gmail.com
-    pass: process.env.EMAIL_PASS,   // Gmail App Password (not account password)
+    user: process.env.EMAIL_USER,   // e.g. aquiq@prtechno.in
+    pass: process.env.EMAIL_PASS,   // email account password
   },
 });
 
