@@ -271,7 +271,8 @@ async function detectAnomalies(customer, current) {
         await sendPushNotification(
           customer.push_token,
           anomaly.severity === 'critical' ? '🚨 AQUIQ Critical Alert' : '⚠️ AQUIQ Warning',
-          anomaly.message
+          anomaly.message,
+          anomaly.severity
         );
       }
     }
@@ -280,17 +281,23 @@ async function detectAnomalies(customer, current) {
   }
 }
 
-async function sendPushNotification(token, title, body) {
+async function sendPushNotification(token, title, body, severity = 'warning') {
   try {
+    const channelId = severity === 'critical' ? 'aquiq-critical'
+      : severity === 'warning' ? 'aquiq-warning'
+      : 'aquiq-info';
+
     await axios.post('https://exp.host/--/api/v2/push/send', {
       to: token,
       title,
       body,
-      sound: 'default',
-      priority: 'high',
-      data: { type: 'anomaly' },
+      sound: 'aquiq_alert',        // custom AQUIQ sound on iOS
+      channelId,                   // Android channel (has custom sound embedded)
+      priority: severity === 'critical' ? 'high' : 'normal',
+      badge: 1,
+      data: { type: 'anomaly', severity },
     }, { headers: { 'Content-Type': 'application/json' } });
-    console.log('[AQUIQ] Push notification sent');
+    console.log(`[AQUIQ] Push sent — channel: ${channelId}`);
   } catch (err) {
     console.error('[AQUIQ] Push notification failed:', err.message);
   }
@@ -685,7 +692,8 @@ async function runPredictiveMaintenance() {
           await sendPushNotification(
             customer.push_token,
             prediction.urgency === 'critical' ? '🚨 Service Required Soon' : '🔧 Maintenance Alert',
-            prediction.message
+            prediction.message,
+            prediction.urgency
           );
         }
       } catch (err) {
