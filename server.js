@@ -16,10 +16,17 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY
 );
 
-const twilioClient = twilio(
-  process.env.TWILIO_ACCOUNT_SID,
-  process.env.TWILIO_AUTH_TOKEN
-);
+// Twilio — lazy init so missing creds don't crash the server at startup
+let twilioClient = null;
+function getTwilio() {
+  if (!twilioClient) {
+    twilioClient = twilio(
+      process.env.TWILIO_ACCOUNT_SID,
+      process.env.TWILIO_AUTH_TOKEN
+    );
+  }
+  return twilioClient;
+}
 
 const BACKEND_URL = process.env.BACKEND_URL || 'https://web-production-85fd6.up.railway.app';
 const JOB_TIMEOUT_MS = 3 * 60 * 1000; // 3 minutes
@@ -42,30 +49,141 @@ function generateOTP() {
 }
 
 async function sendOTPEmail(toEmail, otp, name) {
+  const year = new Date().getFullYear();
+  const time = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' });
+
   const html = `
-    <div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;background:#050810;color:#fff;border-radius:16px;overflow:hidden">
-      <div style="background:#050810;padding:32px;text-align:center;border-bottom:1px solid #0a1a2a">
-        <div style="font-size:32px;font-weight:900;letter-spacing:8px;color:#00d4ff">AQUIQ</div>
-        <div style="font-size:11px;color:#555;letter-spacing:2px;margin-top:4px">SMART RO MONITORING · BY PR TECHNO</div>
-      </div>
-      <div style="padding:32px">
-        <p style="color:#888;margin-bottom:8px">Hello ${name || 'there'},</p>
-        <p style="color:#ccc;margin-bottom:24px">Use the OTP below to reset your AQUIQ password. This code expires in <strong style="color:#00d4ff">10 minutes</strong>.</p>
-        <div style="background:#0d1a2b;border:1px solid #003366;border-radius:12px;padding:24px;text-align:center;margin:24px 0">
-          <div style="font-size:42px;font-weight:900;letter-spacing:12px;color:#00d4ff">${otp}</div>
-          <div style="color:#555;font-size:12px;margin-top:8px">One-Time Password</div>
-        </div>
-        <p style="color:#555;font-size:12px">If you didn't request this, ignore this email. Your account is safe.</p>
-      </div>
-      <div style="padding:16px 32px;border-top:1px solid #0a1a2a;text-align:center">
-        <div style="color:#333;font-size:11px">AQUIQ™ by PR TECHNO · Secure RO Monitoring</div>
-      </div>
-    </div>`;
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>AQUIQ Password Reset OTP</title>
+</head>
+<body style="margin:0;padding:0;background:#0a0d12;font-family:'Segoe UI',Arial,sans-serif;">
+
+  <!-- Outer wrapper -->
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#0a0d12;padding:32px 0;">
+    <tr><td align="center">
+    <table width="520" cellpadding="0" cellspacing="0" style="max-width:520px;width:100%;background:#0f1623;border-radius:20px;overflow:hidden;border:1px solid #1a2540;">
+
+      <!-- ── HEADER ── -->
+      <tr>
+        <td style="background:linear-gradient(135deg,#050810 0%,#0a1628 100%);padding:36px 40px 28px;text-align:center;border-bottom:1px solid #0d1e33;">
+          <!-- Water drop SVG -->
+          <div style="margin-bottom:16px;">
+            <svg width="44" height="56" viewBox="0 0 44 56" xmlns="http://www.w3.org/2000/svg">
+              <path d="M22 2 C22 2 2 28 2 38 C2 49 11 54 22 54 C33 54 42 49 42 38 C42 28 22 2 22 2Z" fill="#00d4ff" opacity="0.15"/>
+              <path d="M22 6 C22 6 5 30 5 39 C5 48.4 12.8 53 22 53 C31.2 53 39 48.4 39 39 C39 30 22 6 22 6Z" fill="none" stroke="#00d4ff" stroke-width="1.5"/>
+              <ellipse cx="16" cy="34" rx="4" ry="7" fill="#00d4ff" opacity="0.3" transform="rotate(-25 16 34)"/>
+            </svg>
+          </div>
+          <!-- Wordmark -->
+          <div style="font-size:36px;font-weight:900;letter-spacing:10px;color:#ffffff;line-height:1;">AQUIQ</div>
+          <div style="font-size:10px;color:#00d4ff;letter-spacing:3px;margin-top:6px;text-transform:uppercase;">Smart RO Monitoring</div>
+          <div style="font-size:10px;color:#334466;letter-spacing:2px;margin-top:3px;text-transform:uppercase;">by PR TECHNO</div>
+        </td>
+      </tr>
+
+      <!-- ── TITLE BAND ── -->
+      <tr>
+        <td style="background:#00d4ff;padding:10px 40px;text-align:center;">
+          <span style="font-size:12px;font-weight:800;color:#000;letter-spacing:2px;text-transform:uppercase;">🔐 Password Reset Request</span>
+        </td>
+      </tr>
+
+      <!-- ── BODY ── -->
+      <tr>
+        <td style="padding:36px 40px 28px;">
+
+          <!-- Greeting -->
+          <p style="margin:0 0 6px;font-size:22px;font-weight:800;color:#ffffff;">Hello, ${name || 'there'} 👋</p>
+          <p style="margin:0 0 28px;font-size:14px;color:#7a8fa8;line-height:1.7;">
+            We received a request to reset the password for your <strong style="color:#00d4ff;">AQUIQ UHAD account</strong>.
+            Use the one-time password below to proceed.
+          </p>
+
+          <!-- OTP Box -->
+          <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px;">
+            <tr>
+              <td style="background:#050e1c;border:1.5px solid #00d4ff;border-radius:14px;padding:30px 20px;text-align:center;">
+                <div style="font-size:11px;color:#445566;letter-spacing:3px;text-transform:uppercase;margin-bottom:12px;">Your One-Time Password</div>
+                <div style="font-size:52px;font-weight:900;letter-spacing:14px;color:#00d4ff;line-height:1;font-variant-numeric:tabular-nums;">${otp}</div>
+                <div style="margin-top:16px;display:inline-block;background:#0d2040;border:1px solid #003366;border-radius:20px;padding:5px 16px;">
+                  <span style="font-size:12px;color:#4488aa;">⏱ Expires in </span>
+                  <strong style="color:#00d4ff;font-size:12px;">10 minutes</strong>
+                </div>
+              </td>
+            </tr>
+          </table>
+
+          <!-- Steps -->
+          <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
+            <tr>
+              <td style="background:#0a1628;border-radius:12px;padding:20px 22px;">
+                <div style="font-size:11px;color:#445566;letter-spacing:2px;text-transform:uppercase;margin-bottom:14px;">How to use</div>
+                ${[
+                  ['1', 'Go back to the AQUIQ app on your phone'],
+                  ['2', 'Enter this 6-digit OTP in the verification field'],
+                  ['3', 'Set your new password and confirm it'],
+                ].map(([n, text]) => `
+                <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:10px;">
+                  <tr>
+                    <td width="28" valign="top">
+                      <div style="width:24px;height:24px;border-radius:50%;background:#00d4ff22;border:1px solid #00d4ff44;text-align:center;line-height:24px;font-size:11px;font-weight:800;color:#00d4ff;">${n}</div>
+                    </td>
+                    <td style="padding-left:10px;font-size:13px;color:#8899aa;line-height:20px;">${text}</td>
+                  </tr>
+                </table>`).join('')}
+              </td>
+            </tr>
+          </table>
+
+          <!-- Security notice -->
+          <table width="100%" cellpadding="0" cellspacing="0">
+            <tr>
+              <td style="background:#1a0a00;border:1px solid #331500;border-radius:10px;padding:14px 16px;">
+                <p style="margin:0;font-size:12px;color:#aa6633;line-height:1.6;">
+                  ⚠️ <strong style="color:#cc8844;">Did not request this?</strong><br/>
+                  If you did not request a password reset, please ignore this email. Your account remains secure and no changes have been made.
+                </p>
+              </td>
+            </tr>
+          </table>
+
+        </td>
+      </tr>
+
+      <!-- ── DIVIDER ── -->
+      <tr><td style="padding:0 40px;"><div style="height:1px;background:#1a2540;"></div></td></tr>
+
+      <!-- ── FOOTER ── -->
+      <tr>
+        <td style="padding:24px 40px;text-align:center;">
+          <div style="font-size:16px;font-weight:900;letter-spacing:5px;color:#334455;margin-bottom:4px;">AQUIQ™</div>
+          <div style="font-size:11px;color:#223344;margin-bottom:14px;">Smart RO Monitoring Platform · by PR TECHNO</div>
+
+          <div style="height:1px;background:#151f2e;margin-bottom:14px;"></div>
+
+          <div style="font-size:10px;color:#1e2d3d;line-height:1.8;">
+            This email was sent to <span style="color:#2a4060;">${toEmail}</span><br/>
+            Sent at ${time} IST · noreply@prtechno.in<br/>
+            © ${year} PR TECHNO. All rights reserved.
+          </div>
+        </td>
+      </tr>
+
+    </table>
+    </td></tr>
+  </table>
+
+</body>
+</html>`;
 
   await mailer.sendMail({
     from: '"AQUIQ™ by PR TECHNO" <noreply@prtechno.in>',
     to: toEmail,
-    subject: `${otp} is your AQUIQ password reset OTP`,
+    subject: `${otp} — Your AQUIQ Password Reset OTP (valid 10 min)`,
     html,
   });
 }
@@ -648,7 +766,7 @@ app.get('/jobs', async (req, res) => {
 async function sendWhatsApp(to, message) {
   try {
     const toFormatted = to.startsWith('whatsapp:') ? to : `whatsapp:+91${to.replace(/^0/, '')}`;
-    await twilioClient.messages.create({
+    await getTwilio().messages.create({
       from: process.env.TWILIO_WHATSAPP_FROM,
       to: toFormatted,
       body: message
