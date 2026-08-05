@@ -63,7 +63,7 @@ async function sendOTPEmail(toEmail, otp, name) {
     </div>`;
 
   await mailer.sendMail({
-    from: `"AQUIQ™ by PR TECHNO" <${process.env.EMAIL_USER}>`,
+    from: '"AQUIQ™ by PR TECHNO" <noreply@prtechno.in>',
     to: toEmail,
     subject: `${otp} is your AQUIQ password reset OTP`,
     html,
