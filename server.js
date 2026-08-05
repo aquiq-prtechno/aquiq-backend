@@ -5,6 +5,7 @@ const { createClient } = require('@supabase/supabase-js');
 const twilio = require('twilio');
 const axios = require('axios');
 const cron = require('node-cron');
+const nodemailer = require('nodemailer');
 
 const app = express();
 app.use(cors());
@@ -22,6 +23,128 @@ const twilioClient = twilio(
 
 const BACKEND_URL = process.env.BACKEND_URL || 'https://web-production-85fd6.up.railway.app';
 const JOB_TIMEOUT_MS = 3 * 60 * 1000; // 3 minutes
+
+// ─── Email Transporter ────────────────────────────────────────────────────────
+const mailer = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: process.env.EMAIL_USER,   // e.g. aquiq@gmail.com
+    pass: process.env.EMAIL_PASS,   // Gmail App Password (not account password)
+  },
+});
+
+function generateOTP() {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+}
+
+async function sendOTPEmail(toEmail, otp, name) {
+  const html = `
+    <div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;background:#050810;color:#fff;border-radius:16px;overflow:hidden">
+      <div style="background:#050810;padding:32px;text-align:center;border-bottom:1px solid #0a1a2a">
+        <div style="font-size:32px;font-weight:900;letter-spacing:8px;color:#00d4ff">AQUIQ</div>
+        <div style="font-size:11px;color:#555;letter-spacing:2px;margin-top:4px">SMART RO MONITORING · BY PR TECHNO</div>
+      </div>
+      <div style="padding:32px">
+        <p style="color:#888;margin-bottom:8px">Hello ${name || 'there'},</p>
+        <p style="color:#ccc;margin-bottom:24px">Use the OTP below to reset your AQUIQ password. This code expires in <strong style="color:#00d4ff">10 minutes</strong>.</p>
+        <div style="background:#0d1a2b;border:1px solid #003366;border-radius:12px;padding:24px;text-align:center;margin:24px 0">
+          <div style="font-size:42px;font-weight:900;letter-spacing:12px;color:#00d4ff">${otp}</div>
+          <div style="color:#555;font-size:12px;margin-top:8px">One-Time Password</div>
+        </div>
+        <p style="color:#555;font-size:12px">If you didn't request this, ignore this email. Your account is safe.</p>
+      </div>
+      <div style="padding:16px 32px;border-top:1px solid #0a1a2a;text-align:center">
+        <div style="color:#333;font-size:11px">AQUIQ™ by PR TECHNO · Secure RO Monitoring</div>
+      </div>
+    </div>`;
+
+  await mailer.sendMail({
+    from: `"AQUIQ™ by PR TECHNO" <${process.env.EMAIL_USER}>`,
+    to: toEmail,
+    subject: `${otp} is your AQUIQ password reset OTP`,
+    html,
+  });
+}
+
+// ─── UHAD Auth Routes ─────────────────────────────────────────────────────────
+
+// Register new UHAD
+app.post('/auth/uhad/register', async (req, res) => {
+  try {
+    const { name, company, email, phone, password } = req.body;
+    if (!name || !company || !email || !phone || !password) {
+      return res.status(400).json({ error: 'All fields are required.' });
+    }
+    if (phone.replace(/\D/g, '').length < 10) {
+      return res.status(400).json({ error: 'Enter a valid 10-digit phone number.' });
+    }
+    if (password.length < 6) {
+      return res.status(400).json({ error: 'Password must be at least 6 characters.' });
+    }
+    // Check duplicate email
+    const { data: existingEmail } = await supabase.from('uhads').select('id').eq('email', email.toLowerCase()).single();
+    if (existingEmail) return res.status(409).json({ error: 'An account with this email already exists.' });
+    // Check duplicate phone
+    const { data: existingPhone } = await supabase.from('uhads').select('id').eq('phone', phone.replace(/\D/g, '')).single();
+    if (existingPhone) return res.status(409).json({ error: 'An account with this phone number already exists.' });
+
+    const { data, error } = await supabase.from('uhads').insert([{
+      name: name.trim(),
+      company: company.trim(),
+      email: email.trim().toLowerCase(),
+      phone: phone.replace(/\D/g, ''),
+      password,
+    }]).select().single();
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ success: true, uhad: data });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Send OTP for forgot password
+app.post('/auth/uhad/send-otp', async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ error: 'Email is required.' });
+
+    const { data: uhad } = await supabase.from('uhads').select('id, name, email').eq('email', email.toLowerCase()).single();
+    if (!uhad) return res.status(404).json({ error: 'No account found with this email.' });
+
+    const otp = generateOTP();
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString(); // 10 min
+
+    await supabase.from('uhads').update({ otp_code: otp, otp_expires_at: expiresAt }).eq('id', uhad.id);
+    await sendOTPEmail(uhad.email, otp, uhad.name);
+
+    res.json({ success: true, message: 'OTP sent to your email.' });
+  } catch (err) {
+    console.error('[AQUIQ] OTP error:', err.message);
+    res.status(500).json({ error: 'Failed to send OTP. Check email configuration.' });
+  }
+});
+
+// Verify OTP + reset password
+app.post('/auth/uhad/reset-password', async (req, res) => {
+  try {
+    const { email, otp, newPassword } = req.body;
+    if (!email || !otp || !newPassword) return res.status(400).json({ error: 'All fields required.' });
+    if (newPassword.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters.' });
+
+    const { data: uhad } = await supabase.from('uhads')
+      .select('id, otp_code, otp_expires_at').eq('email', email.toLowerCase()).single();
+
+    if (!uhad) return res.status(404).json({ error: 'Account not found.' });
+    if (!uhad.otp_code || uhad.otp_code !== otp) return res.status(400).json({ error: 'Invalid OTP.' });
+    if (new Date() > new Date(uhad.otp_expires_at)) return res.status(400).json({ error: 'OTP has expired. Please request a new one.' });
+
+    await supabase.from('uhads').update({ password: newPassword, otp_code: null, otp_expires_at: null }).eq('id', uhad.id);
+    res.json({ success: true, message: 'Password reset successfully.' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // ─── Health Check ────────────────────────────────────────────────────────────
 app.get('/health', (req, res) => {
