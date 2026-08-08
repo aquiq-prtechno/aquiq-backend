@@ -4,7 +4,7 @@ const cors = require('cors');
 const { createClient } = require('@supabase/supabase-js');
 const axios = require('axios');
 const cron = require('node-cron');
-const nodemailer = require('nodemailer');
+
 
 const app = express();
 app.use(cors());
@@ -19,163 +19,6 @@ const supabase = createClient(
 const BACKEND_URL = process.env.BACKEND_URL || 'https://web-production-85fd6.up.railway.app';
 const JOB_TIMEOUT_MS = 3 * 60 * 1000; // 3 minutes
 
-// ─── Email Transporter ────────────────────────────────────────────────────────
-// Works with any email provider — custom domain, Zoho, Outlook, Gmail, etc.
-// Set EMAIL_HOST, EMAIL_USER, EMAIL_PASS in Railway env vars
-const mailer = nodemailer.createTransport({
-  host: process.env.EMAIL_HOST || 'smtp.gmail.com',  // e.g. mail.prtechno.in
-  port: parseInt(process.env.EMAIL_PORT || '465'),
-  secure: process.env.EMAIL_PORT !== '587',           // true for 465, false for 587
-  auth: {
-    user: process.env.EMAIL_USER,   // e.g. aquiq@prtechno.in
-    pass: process.env.EMAIL_PASS,   // email account password
-  },
-});
-
-function generateOTP() {
-  return Math.floor(100000 + Math.random() * 900000).toString();
-}
-
-async function sendOTPEmail(toEmail, otp, name) {
-  const year = new Date().getFullYear();
-  const time = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' });
-
-  const html = `
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8"/>
-  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-  <title>AQUIQ Password Reset OTP</title>
-</head>
-<body style="margin:0;padding:0;background:#0a0d12;font-family:'Segoe UI',Arial,sans-serif;">
-
-  <!-- Outer wrapper -->
-  <table width="100%" cellpadding="0" cellspacing="0" style="background:#0a0d12;padding:32px 0;">
-    <tr><td align="center">
-    <table width="520" cellpadding="0" cellspacing="0" style="max-width:520px;width:100%;background:#0f1623;border-radius:20px;overflow:hidden;border:1px solid #1a2540;">
-
-      <!-- ── HEADER ── -->
-      <tr>
-        <td style="background:linear-gradient(135deg,#050810 0%,#0a1628 100%);padding:36px 40px 28px;text-align:center;border-bottom:1px solid #0d1e33;">
-          <!-- Water drop SVG -->
-          <div style="margin-bottom:16px;">
-            <svg width="44" height="56" viewBox="0 0 44 56" xmlns="http://www.w3.org/2000/svg">
-              <path d="M22 2 C22 2 2 28 2 38 C2 49 11 54 22 54 C33 54 42 49 42 38 C42 28 22 2 22 2Z" fill="#00d4ff" opacity="0.15"/>
-              <path d="M22 6 C22 6 5 30 5 39 C5 48.4 12.8 53 22 53 C31.2 53 39 48.4 39 39 C39 30 22 6 22 6Z" fill="none" stroke="#00d4ff" stroke-width="1.5"/>
-              <ellipse cx="16" cy="34" rx="4" ry="7" fill="#00d4ff" opacity="0.3" transform="rotate(-25 16 34)"/>
-            </svg>
-          </div>
-          <!-- Wordmark -->
-          <div style="font-size:36px;font-weight:900;letter-spacing:10px;color:#ffffff;line-height:1;">AQUIQ</div>
-          <div style="font-size:10px;color:#00d4ff;letter-spacing:3px;margin-top:6px;text-transform:uppercase;">Smart RO Monitoring</div>
-          <div style="font-size:10px;color:#334466;letter-spacing:2px;margin-top:3px;text-transform:uppercase;">by PR TECHNO</div>
-        </td>
-      </tr>
-
-      <!-- ── TITLE BAND ── -->
-      <tr>
-        <td style="background:#00d4ff;padding:10px 40px;text-align:center;">
-          <span style="font-size:12px;font-weight:800;color:#000;letter-spacing:2px;text-transform:uppercase;">🔐 Password Reset Request</span>
-        </td>
-      </tr>
-
-      <!-- ── BODY ── -->
-      <tr>
-        <td style="padding:36px 40px 28px;">
-
-          <!-- Greeting -->
-          <p style="margin:0 0 6px;font-size:22px;font-weight:800;color:#ffffff;">Hello, ${name || 'there'} 👋</p>
-          <p style="margin:0 0 28px;font-size:14px;color:#7a8fa8;line-height:1.7;">
-            We received a request to reset the password for your <strong style="color:#00d4ff;">AQUIQ UHAD account</strong>.
-            Use the one-time password below to proceed.
-          </p>
-
-          <!-- OTP Box -->
-          <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px;">
-            <tr>
-              <td style="background:#050e1c;border:1.5px solid #00d4ff;border-radius:14px;padding:30px 20px;text-align:center;">
-                <div style="font-size:11px;color:#445566;letter-spacing:3px;text-transform:uppercase;margin-bottom:12px;">Your One-Time Password</div>
-                <div style="font-size:52px;font-weight:900;letter-spacing:14px;color:#00d4ff;line-height:1;font-variant-numeric:tabular-nums;">${otp}</div>
-                <div style="margin-top:16px;display:inline-block;background:#0d2040;border:1px solid #003366;border-radius:20px;padding:5px 16px;">
-                  <span style="font-size:12px;color:#4488aa;">⏱ Expires in </span>
-                  <strong style="color:#00d4ff;font-size:12px;">10 minutes</strong>
-                </div>
-              </td>
-            </tr>
-          </table>
-
-          <!-- Steps -->
-          <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
-            <tr>
-              <td style="background:#0a1628;border-radius:12px;padding:20px 22px;">
-                <div style="font-size:11px;color:#445566;letter-spacing:2px;text-transform:uppercase;margin-bottom:14px;">How to use</div>
-                ${[
-                  ['1', 'Go back to the AQUIQ app on your phone'],
-                  ['2', 'Enter this 6-digit OTP in the verification field'],
-                  ['3', 'Set your new password and confirm it'],
-                ].map(([n, text]) => `
-                <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:10px;">
-                  <tr>
-                    <td width="28" valign="top">
-                      <div style="width:24px;height:24px;border-radius:50%;background:#00d4ff22;border:1px solid #00d4ff44;text-align:center;line-height:24px;font-size:11px;font-weight:800;color:#00d4ff;">${n}</div>
-                    </td>
-                    <td style="padding-left:10px;font-size:13px;color:#8899aa;line-height:20px;">${text}</td>
-                  </tr>
-                </table>`).join('')}
-              </td>
-            </tr>
-          </table>
-
-          <!-- Security notice -->
-          <table width="100%" cellpadding="0" cellspacing="0">
-            <tr>
-              <td style="background:#1a0a00;border:1px solid #331500;border-radius:10px;padding:14px 16px;">
-                <p style="margin:0;font-size:12px;color:#aa6633;line-height:1.6;">
-                  ⚠️ <strong style="color:#cc8844;">Did not request this?</strong><br/>
-                  If you did not request a password reset, please ignore this email. Your account remains secure and no changes have been made.
-                </p>
-              </td>
-            </tr>
-          </table>
-
-        </td>
-      </tr>
-
-      <!-- ── DIVIDER ── -->
-      <tr><td style="padding:0 40px;"><div style="height:1px;background:#1a2540;"></div></td></tr>
-
-      <!-- ── FOOTER ── -->
-      <tr>
-        <td style="padding:24px 40px;text-align:center;">
-          <div style="font-size:16px;font-weight:900;letter-spacing:5px;color:#334455;margin-bottom:4px;">AQUIQ™</div>
-          <div style="font-size:11px;color:#223344;margin-bottom:14px;">Smart RO Monitoring Platform · by PR TECHNO</div>
-
-          <div style="height:1px;background:#151f2e;margin-bottom:14px;"></div>
-
-          <div style="font-size:10px;color:#1e2d3d;line-height:1.8;">
-            This email was sent to <span style="color:#2a4060;">${toEmail}</span><br/>
-            Sent at ${time} IST · noreply@prtechno.in<br/>
-            ⚠️ Please do not reply to this email — this mailbox is not monitored.<br/>
-            © ${year} PR TECHNO. All rights reserved.
-          </div>
-        </td>
-      </tr>
-
-    </table>
-    </td></tr>
-  </table>
-
-</body>
-</html>`;
-
-  await mailer.sendMail({
-    from: '"AQUIQ™ by PR TECHNO" <noreply@prtechno.in>',
-    to: toEmail,
-    subject: `${otp} — Your AQUIQ Password Reset OTP (valid 10 min)`,
-    html,
-  });
-}
 
 // ─── UHAD Auth Routes ─────────────────────────────────────────────────────────
 
@@ -209,49 +52,6 @@ app.post('/auth/uhad/register', async (req, res) => {
 
     if (error) return res.status(500).json({ error: error.message });
     res.json({ success: true, uhad: data });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Send OTP for forgot password
-app.post('/auth/uhad/send-otp', async (req, res) => {
-  try {
-    const { email } = req.body;
-    if (!email) return res.status(400).json({ error: 'Email is required.' });
-
-    const { data: uhad } = await supabase.from('uhads').select('id, name, email').eq('email', email.toLowerCase()).single();
-    if (!uhad) return res.status(404).json({ error: 'No account found with this email.' });
-
-    const otp = generateOTP();
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString(); // 10 min
-
-    await supabase.from('uhads').update({ otp_code: otp, otp_expires_at: expiresAt }).eq('id', uhad.id);
-    await sendOTPEmail(uhad.email, otp, uhad.name);
-
-    res.json({ success: true, message: 'OTP sent to your email.' });
-  } catch (err) {
-    console.error('[AQUIQ] OTP error:', err.message);
-    res.status(500).json({ error: 'Failed to send OTP. Check email configuration.' });
-  }
-});
-
-// Verify OTP + reset password
-app.post('/auth/uhad/reset-password', async (req, res) => {
-  try {
-    const { email, otp, newPassword } = req.body;
-    if (!email || !otp || !newPassword) return res.status(400).json({ error: 'All fields required.' });
-    if (newPassword.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters.' });
-
-    const { data: uhad } = await supabase.from('uhads')
-      .select('id, otp_code, otp_expires_at').eq('email', email.toLowerCase()).single();
-
-    if (!uhad) return res.status(404).json({ error: 'Account not found.' });
-    if (!uhad.otp_code || uhad.otp_code !== otp) return res.status(400).json({ error: 'Invalid OTP.' });
-    if (new Date() > new Date(uhad.otp_expires_at)) return res.status(400).json({ error: 'OTP has expired. Please request a new one.' });
-
-    await supabase.from('uhads').update({ password: newPassword, otp_code: null, otp_expires_at: null }).eq('id', uhad.id);
-    res.json({ success: true, message: 'Password reset successfully.' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -907,6 +707,143 @@ app.get('/admin/predict', async (req, res) => {
 
 // Run every Monday at 6 AM IST (00:30 UTC)
 cron.schedule('30 0 * * 1', runPredictiveMaintenance);
+
+// ─── Monthly Report Auto-Generation ──────────────────────────────────────────
+async function generateMonthlyReports() {
+  console.log('[REPORTS] Starting monthly report generation...');
+  const now = new Date();
+  // Previous month
+  const year = now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear();
+  const month = now.getMonth() === 0 ? 12 : now.getMonth(); // 1-indexed
+  const monthKey = `${year}-${String(month).padStart(2, '0')}`;
+  const monthLabel = new Date(year, month - 1, 1).toLocaleString('en-US', { month: 'long', year: 'numeric' });
+  const start = new Date(year, month - 1, 1).toISOString();
+  const end = new Date(year, month, 0, 23, 59, 59).toISOString();
+
+  // Get all active UHSA stores
+  const { data: stores, error: storeErr } = await supabase
+    .from('customers')
+    .select('id, tds_threshold, account_status')
+    .eq('role', 'uhsa')
+    .or('account_status.eq.active,account_status.is.null');
+
+  if (storeErr || !stores) {
+    console.error('[REPORTS] Failed to fetch stores:', storeErr?.message);
+    return;
+  }
+
+  let count = 0;
+  for (const store of stores) {
+    const { data: rows } = await supabase
+      .from('sensor_history').select('*')
+      .eq('device_id', store.id)
+      .gte('recorded_at', start).lte('recorded_at', end);
+
+    if (!rows || rows.length === 0) continue;
+
+    const tds  = rows.map(r => r.output_tds).filter(v => v != null);
+    const mem  = rows.map(r => r.membrane_health).filter(v => v != null);
+    const pump = rows.map(r => r.pump_health).filter(v => v != null);
+    const flow = rows.map(r => r.output_flow).filter(v => v != null);
+    const temp = rows.map(r => r.temperature).filter(v => v != null);
+    const vol  = rows.map(r => r.total_volume_today).filter(v => v != null);
+    const avg  = arr => arr.length ? Math.round((arr.reduce((a, b) => a + b, 0) / arr.length) * 10) / 10 : null;
+    const threshold = store.tds_threshold || 150;
+    const avgTds = avg(tds);
+    const overall = avgTds > threshold ? 'critical' : avgTds > threshold * 0.85 ? 'warning' : 'good';
+
+    const summary = {
+      avg_tds: avgTds,
+      min_tds: tds.length ? Math.min(...tds) : null,
+      max_tds: tds.length ? Math.max(...tds) : null,
+      tds_exceed: tds.filter(v => v > threshold).length,
+      avg_membrane: avg(mem),
+      avg_pump: avg(pump),
+      avg_flow: avg(flow),
+      avg_temp: avg(temp),
+      total_volume: vol.length ? Math.round(vol.reduce((a, b) => a + b, 0) * 10) / 10 : null,
+      tds_threshold: threshold,
+      overall_status: overall,
+    };
+
+    await supabase.from('reports').upsert({
+      device_id: store.id,
+      month: monthKey,
+      month_label: monthLabel,
+      summary,
+      row_count: rows.length,
+      generated_at: new Date().toISOString(),
+    }, { onConflict: 'device_id,month' });
+
+    count++;
+  }
+  console.log(`[REPORTS] Done — ${count} reports generated for ${monthLabel}`);
+}
+
+// Run on 1st of every month at 12:05 AM IST (18:35 UTC previous day)
+// IST = UTC + 5:30, so 12:05 AM IST = 18:35 UTC of previous day
+cron.schedule('35 18 28-31 * *', () => {
+  // Only run on actual last-day-of-month transitions
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  if (tomorrow.getDate() === 1) generateMonthlyReports();
+});
+// Also run on 1st at 12:05 AM IST as backup
+cron.schedule('35 18 1 * *', generateMonthlyReports);
+
+// Manual trigger endpoint (for admin panel "Generate" button)
+app.post('/reports/generate', async (req, res) => {
+  const { month, store_id } = req.body; // month: 'YYYY-MM', store_id: optional
+  if (!month) return res.status(400).json({ error: 'month required (YYYY-MM)' });
+
+  const [year, mon] = month.split('-').map(Number);
+  const monthLabel = new Date(year, mon - 1, 1).toLocaleString('en-US', { month: 'long', year: 'numeric' });
+  const start = new Date(year, mon - 1, 1).toISOString();
+  const end = new Date(year, mon, 0, 23, 59, 59).toISOString();
+
+  let query = supabase.from('customers').select('id, tds_threshold').eq('role', 'uhsa');
+  if (store_id) query = query.eq('id', store_id);
+  const { data: stores } = await query;
+  if (!stores) return res.status(500).json({ error: 'Failed to fetch stores' });
+
+  let count = 0;
+  for (const store of stores) {
+    const { data: rows } = await supabase
+      .from('sensor_history').select('*')
+      .eq('device_id', store.id)
+      .gte('recorded_at', start).lte('recorded_at', end);
+
+    if (!rows || rows.length === 0) continue;
+
+    const tds  = rows.map(r => r.output_tds).filter(v => v != null);
+    const mem  = rows.map(r => r.membrane_health).filter(v => v != null);
+    const pump = rows.map(r => r.pump_health).filter(v => v != null);
+    const flow = rows.map(r => r.output_flow).filter(v => v != null);
+    const temp = rows.map(r => r.temperature).filter(v => v != null);
+    const vol  = rows.map(r => r.total_volume_today).filter(v => v != null);
+    const avg  = arr => arr.length ? Math.round((arr.reduce((a, b) => a + b, 0) / arr.length) * 10) / 10 : null;
+    const threshold = store.tds_threshold || 150;
+    const avgTds = avg(tds);
+
+    await supabase.from('reports').upsert({
+      device_id: store.id, month, month_label: monthLabel,
+      summary: {
+        avg_tds: avgTds, min_tds: tds.length ? Math.min(...tds) : null,
+        max_tds: tds.length ? Math.max(...tds) : null,
+        tds_exceed: tds.filter(v => v > threshold).length,
+        avg_membrane: avg(mem), avg_pump: avg(pump),
+        avg_flow: avg(flow), avg_temp: avg(temp),
+        total_volume: vol.length ? Math.round(vol.reduce((a, b) => a + b, 0) * 10) / 10 : null,
+        tds_threshold: threshold,
+        overall_status: avgTds > threshold ? 'critical' : avgTds > threshold * 0.85 ? 'warning' : 'good',
+      },
+      row_count: rows.length,
+      generated_at: new Date().toISOString(),
+    }, { onConflict: 'device_id,month' });
+    count++;
+  }
+  res.json({ success: true, count, month, monthLabel });
+});
 
 // ─── Start Server ─────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
