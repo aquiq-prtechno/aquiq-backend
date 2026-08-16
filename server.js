@@ -103,7 +103,8 @@ app.post('/customer/register', async (req, res) => {
 app.post('/data', async (req, res) => {
   try {
     const {
-      device_id,
+      device_id,        // Primary ID: AQ-PR51916-32-001001
+      wifi_device_id,   // WiFi/MAC ID: 51916-AQ-PR-XX:XX:XX (only when WiFi connected)
       tds_value: tds_value_raw,
       tds,
       feed_tds,
@@ -114,6 +115,10 @@ app.post('/data', async (req, res) => {
       reject_ratio,
       pump_health,
       pump_current,
+      pump_peak,
+      pump_status,      // "healthy" / "overload" / "weak" / "off" / "calibrating"
+      pump_baseline,    // Learned normal current for this pump (A)
+      pump_size,        // "small" / "big" / "micro" / "industrial"
       temperature,
       total_volume_today,
     } = req.body;
@@ -122,7 +127,7 @@ app.post('/data', async (req, res) => {
 
     if (!device_id) return res.status(400).json({ error: 'device_id required' });
 
-    console.log(`[AQUIQ] Data from ${device_id}: TDS=${tds_value}`);
+    console.log(`[AQUIQ] Data from ${device_id} | WiFi ID: ${wifi_device_id ?? 'N/A'} | TDS=${tds_value}`);
 
     const sensor_data = {
       feed_tds: feed_tds ?? null,
@@ -133,24 +138,44 @@ app.post('/data', async (req, res) => {
       reject_ratio: reject_ratio ?? null,
       pump_health: pump_health ?? null,
       pump_current: pump_current ?? null,
+      pump_peak: pump_peak ?? null,
+      pump_status: pump_status ?? null,
+      pump_baseline: pump_baseline ?? null,
+      pump_size: pump_size ?? null,
       temperature: temperature ?? null,
       total_volume_today: total_volume_today ?? null,
     };
 
+    // Update by Primary ID — also save WiFi ID as proof of connection
+    const updatePayload = {
+      last_tds: tds_value ?? null,
+      sensor_data,
+      last_seen: new Date().toISOString(),
+    };
+    if (wifi_device_id) updatePayload.wifi_device_id = wifi_device_id;
+    // Save pump size + baseline when ESP32 sends them (after calibration)
+    if (pump_size && pump_size !== 'unknown')  updatePayload.pump_size     = pump_size;
+    if (pump_baseline && pump_baseline > 0)    updatePayload.pump_baseline = pump_baseline;
+    if (pump_status)                           updatePayload.pump_status   = pump_status;
+
     const { data: customer, error: custErr } = await supabase
       .from('customers')
-      .update({
-        last_tds: tds_value ?? null,
-        sensor_data,
-        last_seen: new Date().toISOString(),
-      })
+      .update(updatePayload)
       .eq('device_id', device_id)
       .select()
       .single();
 
     if (custErr || !customer) {
       console.error(`[AQUIQ] DB error for ${device_id}:`, JSON.stringify(custErr));
-      return res.status(404).json({ error: 'Device not found' });
+      return res.status(404).json({ error: 'Device not found. Register device in admin first.' });
+    }
+
+    // ── Remote Suspension Check ──────────────────────────────────────────────
+    // If admin suspended this device — return suspended status immediately
+    // ESP32 will show solid red LED and stop sending data
+    if (customer.account_status === 'suspended') {
+      console.log(`[AQUIQ] ⛔ Device ${device_id} is suspended — blocking data`);
+      return res.json({ success: false, device_status: 'suspended', message: 'Device suspended by admin' });
     }
 
     // Insert into sensor_history for reports & anomaly detection
@@ -201,7 +226,10 @@ app.post('/data', async (req, res) => {
       output_flow, pump_health, pump_current, temperature,
     });
 
-    res.json({ success: true, device_id, tds: tds_value });
+    // Hardware event detection — only logs on threshold breach, not every cycle
+    detectHardwareEvents(customer, { pump_current, pump_status, pump_baseline, pump_peak, output_flow, membrane_health });
+
+    res.json({ success: true, device_id, tds: tds_value, device_status: 'active' });
   } catch (err) {
     console.error('[AQUIQ] /data error:', err.message);
     res.status(500).json({ error: err.message });
@@ -843,6 +871,143 @@ app.post('/reports/generate', async (req, res) => {
     count++;
   }
   res.json({ success: true, count, month, monthLabel });
+});
+
+// ─── Hardware Event Detection ─────────────────────────────────────────────────
+// Only fires when something bad happens — not every 30 sec cycle
+async function detectHardwareEvents(customer, data) {
+  try {
+    const { pump_current, pump_status, pump_baseline, pump_peak, output_flow, membrane_health } = data;
+    const events = [];
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+
+    async function alreadyLogged(event_type) {
+      const { data: existing } = await supabase
+        .from('hardware_events')
+        .select('id')
+        .eq('device_id', customer.device_id)
+        .eq('event_type', event_type)
+        .gte('created_at', oneHourAgo)
+        .limit(1);
+      return existing && existing.length > 0;
+    }
+
+    // 1. Pump overload — current spike way above baseline
+    if (pump_current && pump_baseline && pump_baseline > 1 && pump_current > pump_baseline * 1.5) {
+      if (!(await alreadyLogged('pump_overload'))) {
+        events.push({
+          device_id: customer.device_id,
+          customer_id: customer.id,
+          event_type: 'pump_overload',
+          value: pump_current,
+          unit: 'A',
+          message: `Pump overload: ${pump_current.toFixed(1)}A (baseline: ${pump_baseline.toFixed(1)}A — ${Math.round((pump_current/pump_baseline-1)*100)}% over)`,
+          severity: 'critical',
+        });
+      }
+    }
+
+    // 2. Pump weak — current dropped far below baseline (clog or failing motor)
+    if (pump_current && pump_baseline && pump_baseline > 1 && pump_current < pump_baseline * 0.5 && pump_current > 0.5) {
+      if (!(await alreadyLogged('pump_weak'))) {
+        events.push({
+          device_id: customer.device_id,
+          customer_id: customer.id,
+          event_type: 'pump_weak',
+          value: pump_current,
+          unit: 'A',
+          message: `Pump running weak: ${pump_current.toFixed(1)}A (expected ~${pump_baseline.toFixed(1)}A — possible clog or motor issue)`,
+          severity: 'warning',
+        });
+      }
+    }
+
+    // 3. Pump off unexpectedly — near zero current but was calibrated
+    if (pump_status === 'off' && pump_baseline && pump_baseline > 1) {
+      if (!(await alreadyLogged('pump_off'))) {
+        events.push({
+          device_id: customer.device_id,
+          customer_id: customer.id,
+          event_type: 'pump_off',
+          value: pump_current ?? 0,
+          unit: 'A',
+          message: `Pump stopped unexpectedly: ${(pump_current||0).toFixed(1)}A detected (baseline: ${pump_baseline.toFixed(1)}A)`,
+          severity: 'critical',
+        });
+      }
+    }
+
+    // 4. Current spike (peak way above average — voltage surge)
+    if (pump_peak && pump_current && pump_peak > pump_current * 2.5 && pump_peak > 5) {
+      if (!(await alreadyLogged('current_spike'))) {
+        events.push({
+          device_id: customer.device_id,
+          customer_id: customer.id,
+          event_type: 'current_spike',
+          value: pump_peak,
+          unit: 'A',
+          message: `High current spike detected: peak ${pump_peak.toFixed(1)}A vs avg ${pump_current.toFixed(1)}A — possible voltage surge`,
+          severity: 'warning',
+        });
+      }
+    }
+
+    // 5. No flow but pump running
+    if (output_flow === 0 && pump_status === 'healthy') {
+      if (!(await alreadyLogged('no_flow'))) {
+        events.push({
+          device_id: customer.device_id,
+          customer_id: customer.id,
+          event_type: 'no_flow',
+          value: 0,
+          unit: 'L/min',
+          message: `Zero flow while pump running — possible pipe blockage or membrane failure`,
+          severity: 'critical',
+        });
+      }
+    }
+
+    // 6. Membrane health critical drop
+    if (membrane_health != null && membrane_health < 30) {
+      if (!(await alreadyLogged('membrane_critical'))) {
+        events.push({
+          device_id: customer.device_id,
+          customer_id: customer.id,
+          event_type: 'membrane_critical',
+          value: membrane_health,
+          unit: '%',
+          message: `Membrane health critically low: ${membrane_health}% — replacement needed soon`,
+          severity: 'critical',
+        });
+      }
+    }
+
+    if (!events.length) return;
+    await supabase.from('hardware_events').insert(events);
+    console.log(`[AQUIQ] ⚠️ ${events.length} hardware event(s) logged for ${customer.device_id}`);
+  } catch (err) {
+    console.error('[AQUIQ] Hardware event detection error:', err.message);
+  }
+}
+
+// ─── GET Hardware Events for a device ────────────────────────────────────────
+app.get('/hardware-events/:device_id', async (req, res) => {
+  try {
+    const { device_id } = req.params;
+    const limit = parseInt(req.query.limit) || 50;
+
+    const { data, error } = await supabase
+      .from('hardware_events')
+      .select('*')
+      .eq('device_id', device_id)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ events: data || [] });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ─── Start Server ─────────────────────────────────────────────────────────────
