@@ -991,6 +991,21 @@ async function detectHardwareEvents(customer, data) {
 }
 
 // ─── GET Hardware Events for a device ────────────────────────────────────────
+// POST a manual hardware event (e.g. hardware swap from admin panel)
+app.post('/hardware-events/:device_id', async (req, res) => {
+  try {
+    const { device_id } = req.params;
+    const { customer_id, event_type, message, severity = 'info', value, unit } = req.body;
+    const { error } = await supabase.from('hardware_events').insert([{
+      device_id, customer_id, event_type, message, severity, value, unit,
+    }]);
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/hardware-events/:device_id', async (req, res) => {
   try {
     const { device_id } = req.params;
