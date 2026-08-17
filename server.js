@@ -229,7 +229,15 @@ app.post('/data', async (req, res) => {
     // Hardware event detection — only logs on threshold breach, not every cycle
     detectHardwareEvents(customer, { pump_current, pump_status, pump_baseline, pump_peak, output_flow, membrane_health });
 
-    res.json({ success: true, device_id, tds: tds_value, device_status: 'active' });
+    // Check for pending remote command (calibrate / restart)
+    const pendingCommand = customer.pending_command || null;
+    if (pendingCommand) {
+      // Clear the command after sending — one-time execution
+      await supabase.from('customers').update({ pending_command: null }).eq('id', customer.id);
+      console.log(`[AQUIQ] 📡 Sending command "${pendingCommand}" to ${device_id}`);
+    }
+
+    res.json({ success: true, device_id, tds: tds_value, device_status: 'active', command: pendingCommand || '' });
   } catch (err) {
     console.error('[AQUIQ] /data error:', err.message);
     res.status(500).json({ error: err.message });
@@ -991,6 +999,21 @@ async function detectHardwareEvents(customer, data) {
 }
 
 // ─── GET Hardware Events for a device ────────────────────────────────────────
+// ─── Remote Command — admin triggers calibrate/restart on ESP32 ──────────────
+app.post('/device/command/:device_id', async (req, res) => {
+  try {
+    const { device_id } = req.params;
+    const { command } = req.body; // "calibrate" or "restart"
+    if (!['calibrate', 'restart'].includes(command)) return res.status(400).json({ error: 'Invalid command' });
+    const { error } = await supabase.from('customers').update({ pending_command: command }).eq('device_id', device_id);
+    if (error) return res.status(500).json({ error: error.message });
+    console.log(`[AQUIQ] 📡 Command "${command}" queued for ${device_id}`);
+    res.json({ success: true, message: `Command "${command}" will execute on next ESP32 ping (within 30 sec)` });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // POST a manual hardware event (e.g. hardware swap from admin panel)
 app.post('/hardware-events/:device_id', async (req, res) => {
   try {
