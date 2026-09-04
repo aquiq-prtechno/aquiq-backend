@@ -1055,3 +1055,50 @@ app.listen(PORT, () => {
   // Run once on startup so prediction is available immediately
   runPredictiveMaintenance();
 });
+
+// ─── Raw TCP Listener (for A7670C / 4G devices that can't do HTTPS on-device) ──
+// Device opens a plain TCP socket (AT+CIPSTART / AT+CIPSEND — no SSL needed),
+// sends the same JSON body used by POST /data, and closes the connection.
+// We forward it internally to the existing /data logic and write back the reply.
+const net = require('net');
+const TCP_PORT = process.env.TCP_PORT || 4000;
+
+const tcpServer = net.createServer((socket) => {
+  let buffer = '';
+  socket.setTimeout(15000); // give slow cellular connections time
+
+  socket.on('data', (chunk) => {
+    buffer += chunk.toString();
+  });
+
+  socket.on('timeout', () => {
+    console.log('[TCP] Socket timed out, closing');
+    socket.end();
+  });
+
+  socket.on('error', (err) => {
+    console.error('[TCP] Socket error:', err.message);
+  });
+
+  socket.on('end', async () => {
+    console.log(`[TCP] Received ${buffer.length} bytes`);
+    try {
+      const payload = JSON.parse(buffer.trim());
+      const response = await axios.post(`http://localhost:${PORT}/data`, payload, {
+        headers: { 'Content-Type': 'application/json' },
+        timeout: 10000,
+      });
+      console.log('[TCP] Forwarded to /data, response:', JSON.stringify(response.data));
+      socket.write(JSON.stringify(response.data));
+    } catch (err) {
+      console.error('[TCP] Error processing payload:', err.message);
+      socket.write(JSON.stringify({ success: false, error: err.message }));
+    } finally {
+      socket.end();
+    }
+  });
+});
+
+tcpServer.listen(TCP_PORT, () => {
+  console.log(`AQUIQ TCP listener (for 4G devices) running on port ${TCP_PORT}`);
+});
