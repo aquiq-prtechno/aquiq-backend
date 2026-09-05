@@ -121,6 +121,8 @@ app.post('/data', async (req, res) => {
       pump_size,        // "small" / "big" / "micro" / "industrial"
       temperature,
       total_volume_today,
+      connection_type,  // "wifi" or "4g" — which network this cycle went over
+      network_name,     // WiFi SSID, or carrier APN like "jionet" / "airtelgprs.com"
     } = req.body;
 
     const tds_value = tds_value_raw ?? tds ?? null;
@@ -157,6 +159,10 @@ app.post('/data', async (req, res) => {
     if (pump_size && pump_size !== 'unknown')  updatePayload.pump_size     = pump_size;
     if (pump_baseline && pump_baseline > 0)    updatePayload.pump_baseline = pump_baseline;
     if (pump_status)                           updatePayload.pump_status   = pump_status;
+    // Live network status — lets AQUIQ Admin show exactly which connection
+    // (site WiFi name, or Jio/Airtel 4G) each device is on right now, from anywhere.
+    if (connection_type) updatePayload.connection_type = connection_type;
+    if (network_name)    updatePayload.network_name    = network_name;
 
     const { data: customer, error: custErr } = await supabase
       .from('customers')
@@ -229,15 +235,27 @@ app.post('/data', async (req, res) => {
     // Hardware event detection — only logs on threshold breach, not every cycle
     detectHardwareEvents(customer, { pump_current, pump_status, pump_baseline, pump_peak, output_flow, membrane_health });
 
-    // Check for pending remote command (calibrate / restart)
+    // Check for pending remote command (calibrate / restart / set_wifi / clear_wifi)
     const pendingCommand = customer.pending_command || null;
+    const responseBody = { success: true, device_id, tds: tds_value, device_status: 'active', command: pendingCommand || '' };
+
     if (pendingCommand) {
-      // Clear the command after sending — one-time execution
-      await supabase.from('customers').update({ pending_command: null }).eq('id', customer.id);
+      // set_wifi needs to carry the credentials along with the command itself —
+      // pulled from pending_wifi_ssid/pending_wifi_pass, set by AQUIQ Admin.
+      if (pendingCommand === 'set_wifi') {
+        responseBody.wifi_ssid = customer.pending_wifi_ssid || '';
+        responseBody.wifi_pass = customer.pending_wifi_pass || '';
+      }
+      // Clear the command (and any credentials staged for it) after sending — one-time execution.
+      await supabase.from('customers').update({
+        pending_command: null,
+        pending_wifi_ssid: null,
+        pending_wifi_pass: null,
+      }).eq('id', customer.id);
       console.log(`[AQUIQ] 📡 Sending command "${pendingCommand}" to ${device_id}`);
     }
 
-    res.json({ success: true, device_id, tds: tds_value, device_status: 'active', command: pendingCommand || '' });
+    res.json(responseBody);
   } catch (err) {
     console.error('[AQUIQ] /data error:', err.message);
     res.status(500).json({ error: err.message });
@@ -1009,6 +1027,48 @@ app.post('/device/command/:device_id', async (req, res) => {
     if (error) return res.status(500).json({ error: error.message });
     console.log(`[AQUIQ] 📡 Command "${command}" queued for ${device_id}`);
     res.json({ success: true, message: `Command "${command}" will execute on next ESP32 ping (within 30 sec)` });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Remote WiFi Provisioning (AQUIQ Admin → device, over 4G) ────────────────
+// Called by AQUIQ Admin once the technician phones in the site's exact WiFi
+// name + password. Queued as a pending command the same way calibrate/restart
+// are — the device picks it up on its next check-in (within ~30 sec, sooner
+// if it's already reporting via 4G) and switches over to WiFi automatically.
+app.post('/device/wifi/:device_id', async (req, res) => {
+  try {
+    const { device_id } = req.params;
+    const { ssid, password } = req.body;
+    if (!ssid) return res.status(400).json({ error: 'ssid is required' });
+
+    const { error } = await supabase.from('customers').update({
+      pending_command: 'set_wifi',
+      pending_wifi_ssid: ssid,
+      pending_wifi_pass: password || '',
+    }).eq('device_id', device_id);
+
+    if (error) return res.status(500).json({ error: error.message });
+    console.log(`[AQUIQ] 📡 WiFi credentials queued for ${device_id} — SSID: ${ssid}`);
+    res.json({ success: true, message: `WiFi "${ssid}" will be applied on next device check-in (within ~30 sec)` });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Remote "trial disconnect" — forces the device off WiFi so you can confirm
+// it falls back to 4G cleanly, without visiting the site.
+app.post('/device/wifi/:device_id/clear', async (req, res) => {
+  try {
+    const { device_id } = req.params;
+    const { error } = await supabase.from('customers').update({
+      pending_command: 'clear_wifi',
+    }).eq('device_id', device_id);
+
+    if (error) return res.status(500).json({ error: error.message });
+    console.log(`[AQUIQ] 📡 WiFi clear queued for ${device_id} (forcing 4G fallback test)`);
+    res.json({ success: true, message: 'Device will drop WiFi and switch to 4G on next check-in' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
