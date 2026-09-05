@@ -1125,22 +1125,20 @@ const TCP_PORT = process.env.TCP_PORT || 4000;
 
 const tcpServer = net.createServer((socket) => {
   let buffer = '';
+  let processed = false;
+  let idleTimer = null;
   socket.setTimeout(15000); // give slow cellular connections time
 
-  socket.on('data', (chunk) => {
-    buffer += chunk.toString();
-  });
-
-  socket.on('timeout', () => {
-    console.log('[TCP] Socket timed out, closing');
-    socket.end();
-  });
-
-  socket.on('error', (err) => {
-    console.error('[TCP] Socket error:', err.message);
-  });
-
-  socket.on('end', async () => {
+  // KEY FIX: the A7670C modem only sends a TCP FIN (closing its side) via
+  // AT+CIPCLOSE — which the firmware issues AFTER it's already given up
+  // waiting for a reply. Waiting for the socket's 'end' event here therefore
+  // deadlocks: we'd only respond after the device stopped listening. Instead,
+  // process the payload as soon as no more data has arrived for a short
+  // moment (300ms) — the whole JSON body arrives in one CIPSEND anyway — so
+  // the reply gets written back WHILE the device is still reading.
+  async function processBuffer() {
+    if (processed) return;
+    processed = true;
     console.log(`[TCP] Received ${buffer.length} bytes`);
     try {
       const payload = JSON.parse(buffer.trim());
@@ -1154,8 +1152,32 @@ const tcpServer = net.createServer((socket) => {
       console.error('[TCP] Error processing payload:', err.message);
       socket.write(JSON.stringify({ success: false, error: err.message }));
     } finally {
-      socket.end();
+      // Give the write a moment to actually flush over the cellular link
+      // before we close — closing too fast can cut the reply off mid-send.
+      setTimeout(() => socket.end(), 2000);
     }
+  }
+
+  socket.on('data', (chunk) => {
+    buffer += chunk.toString();
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(processBuffer, 300);
+  });
+
+  socket.on('timeout', () => {
+    console.log('[TCP] Socket timed out, closing');
+    clearTimeout(idleTimer);
+    processBuffer();
+  });
+
+  socket.on('error', (err) => {
+    console.error('[TCP] Socket error:', err.message);
+  });
+
+  // Still handle a clean end (e.g. if the device DOES close first) as a fallback.
+  socket.on('end', () => {
+    clearTimeout(idleTimer);
+    processBuffer();
   });
 });
 
