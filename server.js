@@ -19,6 +19,18 @@ const supabase = createClient(
 const BACKEND_URL = process.env.BACKEND_URL || 'https://web-production-85fd6.up.railway.app';
 const JOB_TIMEOUT_MS = 3 * 60 * 1000; // 3 minutes
 
+// ─── Admin authentication ────────────────────────────────────────────────────
+// Everything an admin does (device commands, WiFi push, hardware events, job
+// lists, report generation, prediction runs, team management) requires a
+// signed-in staff member. Routes the devices and customer apps use are NOT in
+// this list and stay open: /data, /health, /auth/uhad/register,
+// /technician/accept, /webhook/blynk.
+// Starts in log-only mode; set ADMIN_AUTH_ENFORCE=true on Railway to enforce.
+const { createAdminAuth, ROLES } = require('./adminAuth');
+const adminAuth = createAdminAuth(supabase);
+const ADMIN_URL = process.env.ADMIN_URL || 'https://aquiq-admin.vercel.app';
+app.use(['/admin', '/device', '/hardware-events', '/jobs', '/reports'], adminAuth.requireStaff);
+
 
 // ─── UHAD Auth Routes ─────────────────────────────────────────────────────────
 
@@ -1103,6 +1115,74 @@ app.get('/hardware-events/:device_id', async (req, res) => {
 
     if (error) return res.status(500).json({ error: error.message });
     res.json({ events: data || [] });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Team Access (owner only, always enforced) ───────────────────────────────
+// Needs SUPABASE_SERVICE_KEY on the server — creating users and changing roles
+// is a privileged Supabase action the public key cannot do.
+function needServiceKey(res) {
+  if (process.env.SUPABASE_SERVICE_KEY) return false;
+  res.status(501).json({ error: 'Team management needs SUPABASE_SERVICE_KEY set on the server.' });
+  return true;
+}
+
+app.get('/admin/team', adminAuth.requireOwner, async (req, res) => {
+  if (needServiceKey(res)) return;
+  try {
+    const { data, error } = await supabase.auth.admin.listUsers({ perPage: 200 });
+    if (error) return res.status(500).json({ error: error.message });
+    const members = (data.users || []).map(u => ({
+      id: u.id,
+      email: u.email,
+      role: u.app_metadata?.role || null,
+      disabled: !!(u.banned_until && new Date(u.banned_until) > new Date()),
+      last_sign_in_at: u.last_sign_in_at || null,
+    }));
+    res.json({ members });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/admin/team/invite', adminAuth.requireOwner, async (req, res) => {
+  if (needServiceKey(res)) return;
+  try {
+    const email = String(req.body.email || '').trim().toLowerCase();
+    const role = req.body.role || 'staff';
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'Enter a valid email address.' });
+    if (!ROLES.includes(role)) return res.status(400).json({ error: 'Role must be owner or staff.' });
+
+    const { data, error } = await supabase.auth.admin.inviteUserByEmail(email, { redirectTo: ADMIN_URL });
+    if (error) {
+      const exists = /already|registered|exists/i.test(error.message);
+      return res.status(exists ? 409 : 500).json({ error: exists ? 'That email already has an account.' : error.message });
+    }
+    const { error: roleErr } = await supabase.auth.admin.updateUserById(data.user.id, { app_metadata: { role } });
+    if (roleErr) return res.status(500).json({ error: `Invite sent, but setting the role failed: ${roleErr.message}` });
+
+    console.log(`[AUTH] ${req.admin.email} invited ${email} as ${role}`);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/admin/team/:id/disable', adminAuth.requireOwner, async (req, res) => {
+  if (needServiceKey(res)) return;
+  try {
+    const { id } = req.params;
+    const disabled = !!req.body.disabled;
+    if (id === req.admin.id) return res.status(400).json({ error: 'You cannot switch off your own account.' });
+
+    // A very long ban = switched off; 'none' lifts it. Their access token stops working at once.
+    const { error } = await supabase.auth.admin.updateUserById(id, { ban_duration: disabled ? '876000h' : 'none' });
+    if (error) return res.status(500).json({ error: error.message });
+
+    console.log(`[AUTH] ${req.admin.email} ${disabled ? 'switched off' : 'restored'} user ${id}`);
+    res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
