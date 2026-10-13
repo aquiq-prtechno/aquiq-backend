@@ -6,7 +6,8 @@
 // routes, which sit behind the admin login (mounted under /admin/tickets).
 //
 // Ticket number:  PMR + YY + 117 + counter + MMDD      e.g. PMR2611790001013
-//   117 = A(1) Q(17).  counter starts at 9000 and restarts each January.
+//   117 = A(1) Q(17).  The counter starts at 9000 and NEVER restarts: it runs on
+//   across days and across years. Only YY (26 -> 27 on 1 January) and MMDD change.
 //   YY and MMDD are taken in India time (IST) when the complaint is raised.
 
 const express = require('express');
@@ -196,7 +197,7 @@ function createTicketService(store, { now = () => new Date() } = {}) {
 
     const at = now();
     const { year, month, day } = istParts(at);
-    const seq = await store.nextSeq(SERIES, year, START_SEQ);
+    const seq = await store.nextSeq(SERIES, START_SEQ);   // one continuous counter, not per year
     const ticketNo = formatTicketNo(year, seq, month, day);
 
     const contactPerson = cleanText(input.contact_person, 120) || customer.name || null;
@@ -388,8 +389,9 @@ function supabaseStore(sb) {
   const COLS = 'id,name,phone,address,city,pincode,latitude,longitude,device_id,last_tds,last_seen,sensor_data,connection_type,network_name,pump_baseline,pump_status';
 
   return {
-    async nextSeq(series, year, start) {
-      const { data, error } = await sb.rpc('next_ticket_seq', { p_series: series, p_year: year, p_start: start });
+    async nextSeq(series, start) {
+      // p_year is always 0: the counter is one row per series, so it never resets in January.
+      const { data, error } = await sb.rpc('next_ticket_seq', { p_series: series, p_year: 0, p_start: start });
       if (error) throw fail(error);
       return data;
     },

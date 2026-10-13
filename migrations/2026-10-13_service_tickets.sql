@@ -4,13 +4,15 @@
 -- Ticket number format:  PMR + YY + 117 + counter + MMDD     e.g. PMR2611790001013
 --   PMR = Problem Management Records, YY = year (IST), 117 = A(1) Q(17),
 --   counter starts at 9000, MMDD = the date the complaint was raised (IST).
---   The counter keeps running across days and restarts at 9000 each January.
---   Only YY + counter are stored as columns; the date suffix is part of ticket_no.
+--   The counter NEVER restarts: it runs on across days and across years.
+--   Only YY (26 -> 27 on 1 January) and MMDD change. YY + counter are stored as columns;
+--   the date suffix is part of ticket_no.
 --
 -- SECURITY: these tables have row-level security ON with NO policies, so the public
 -- (anon) key can neither read nor write them. Only the AQUIQ server (service key) can.
 
--- 1. Counter (one row per series + year) and the atomic "give me the next number" function
+-- 1. Counter (ONE row per series) and the atomic "give me the next number" function
+--    The year column is kept only for compatibility and is always 0.
 create table if not exists ticket_counters (
   series   text not null,
   year     int  not null,
@@ -24,15 +26,23 @@ language plpgsql
 as $$
 declare v int;
 begin
-  -- first call of a year inserts p_start; later calls add 1. The row lock makes this atomic,
-  -- so two complaints at the same instant can never receive the same number.
+  -- p_year is ignored on purpose: one continuous counter per series, never reset by the year.
+  -- The first call inserts p_start; later calls add 1. The row lock makes this atomic, so two
+  -- complaints at the same instant can never receive the same number.
   insert into ticket_counters (series, year, last_seq)
-  values (p_series, p_year, p_start)
+  values (p_series, 0, p_start)
   on conflict (series, year) do update set last_seq = ticket_counters.last_seq + 1
   returning last_seq into v;
   return v;
 end;
 $$;
+
+-- If a per-year counter row already exists (from an earlier run), carry its highest number
+-- into the single continuous row so no number is ever issued twice.
+insert into ticket_counters (series, year, last_seq)
+select series, 0, max(last_seq) from ticket_counters where year <> 0 group by series
+on conflict (series, year) do update
+  set last_seq = greatest(ticket_counters.last_seq, excluded.last_seq);
 
 -- 2. Tickets
 create table if not exists tickets (

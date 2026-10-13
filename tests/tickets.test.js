@@ -21,10 +21,9 @@ function memStore(customers) {
   const copy = (o) => (o ? JSON.parse(JSON.stringify(o)) : o);
   return {
     tickets, events,
-    async nextSeq(series, year, start) {
-      const k = `${series}:${year}`;
-      counters[k] = counters[k] == null ? start : counters[k] + 1;
-      return counters[k];
+    async nextSeq(series, start) {
+      counters[series] = counters[series] == null ? start : counters[series] + 1;   // one counter, never resets
+      return counters[series];
     },
     async getCustomer(id) { return copy(customers[id]) || null; },
     async insertTicket(row) {
@@ -90,14 +89,16 @@ const ok400 = async (p, code, re) => {
     const t = await svc.create({ customer_id: CUST, description: 'x' }, ADMIN);
     assert.strictEqual(t.ticket_no, 'PMR2711790000101');
   });
-  await test('year rollover restarts the counter at 9000 (27 = new year)', async () => {
+  await test('new year changes ONLY the year and the date; the counter runs straight on', async () => {
     const c = clock('2026-12-31T10:00:00Z');
     const svc = T.createTicketService(memStore(customers), { now: c.now });
-    await svc.create({ customer_id: CUST, description: 'a' }, ADMIN);
-    await svc.create({ customer_id: CUST, description: 'b' }, ADMIN);
+    const a = await svc.create({ customer_id: CUST, description: 'a' }, ADMIN);
+    const b = await svc.create({ customer_id: CUST, description: 'b' }, ADMIN);
     c.set('2027-01-05T10:00:00Z');
-    const t = await svc.create({ customer_id: CUST, description: 'c' }, ADMIN);
-    assert.strictEqual(t.ticket_no, 'PMR2711790000105');
+    const d = await svc.create({ customer_id: CUST, description: 'c' }, ADMIN);
+    assert.deepStrictEqual([a.ticket_no, b.ticket_no, d.ticket_no],
+      ['PMR2611790001231', 'PMR2611790011231', 'PMR2711790020105']);
+    assert.strictEqual(d.seq, 9002);
   });
   await test('counter past 9999 still produces a clear number', async () => {
     assert.strictEqual(T.formatTicketNo(2026, 10000, '10', '13'), 'PMR261171000010' + '13');
