@@ -11,7 +11,8 @@
 //   YY and MMDD are taken in India time (IST) when the complaint is raised.
 
 const express = require('express');
-const { rankEngineers } = require('./engineers');
+const crypto = require('crypto');
+const { rankEngineers, coverageOf } = require('./engineers');
 
 const SERIES = 'PMR';
 const MIDDLE = '117';
@@ -22,6 +23,15 @@ const NO_ACCEPT_SECONDS = 60;            // unaccepted for 1 minute -> admin ale
 const CUSTOMER_SILENT_2H = 2 * 3600;     // customer silent -> admin may approve on behalf
 const CUSTOMER_SILENT_8H = 8 * 3600;     // still silent -> overdue, flagged as critical
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const PHOTO_BUCKET = 'job-photos';
+const PHOTO_KINDS = ['before', 'after', 'other'];
+const PHOTO_MIMES = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
+const PHOTO_PATH_RE = /^jobs\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/[0-9a-f-]{36}\.(jpg|png|webp)$/;
+const MAX_PHOTOS_PER_JOB = 20;
+const PHOTO_VIEW_SECONDS = 600;
+const ENGINEER_ACTIONS = ['arrive', 'work_done', 'drop', 'note'];
+const WORKING = ['accepted', 'arrived', 'work_done', 'reopened'];
 
 const CATEGORIES = [
   'Water tastes salty / high TDS',
@@ -349,8 +359,10 @@ function createTicketService(store, { now = () => new Date() } = {}) {
     const events = await store.listEvents(ticket.id);
     const ctx = await contextFor();
     const ranked = rankEngineers(siteOf(ticket), ctx.engineers);
+    let photos = [];
+    try { photos = await photosOf(ticket.id, true); } catch { /* photos are optional; never break the ticket view */ }
     return {
-      ticket: decorate(ticket, at, ctx.of(ticket)), events, actions: availableActions(ticket),
+      ticket: decorate(ticket, at, ctx.of(ticket)), events, actions: availableActions(ticket), photos,
       candidates: { recommended: ranked.recommended, statewide: ranked.statewide, others: ranked.others },
     };
   }
@@ -403,7 +415,151 @@ function createTicketService(store, { now = () => new Date() } = {}) {
     return changed;
   }
 
-  return { create, act, list, detail, summary, runWatcher };
+  // ── what an ENGINEER may see and do (used by the engineer app) ──────────────
+
+  const engActor = (eng) => ({ email: `${eng.name} (${eng.engineer_code})`, role: 'engineer' });
+
+  function offerView(t, cov, at) {
+    // Before accepting, only the area and the issue are shown — no name, phone or address.
+    return {
+      id: t.id, ticket_no: t.ticket_no, urgency: t.urgency, issue_category: t.issue_category,
+      description: t.description, pincode: t.pincode, distance_label: cov.label,
+      created_at: t.created_at, age_seconds: Math.max(0, Math.round((at.getTime() - toMs(t.created_at)) / 1000)),
+    };
+  }
+
+  async function photosOf(ticketId, withUrls) {
+    const rows = await store.listPhotos(ticketId);
+    if (!withUrls) return rows.map(p => ({ id: p.id, kind: p.kind, caption: p.caption, created_at: p.created_at }));
+    return Promise.all(rows.map(async (p) => ({
+      id: p.id, kind: p.kind, caption: p.caption, created_at: p.created_at,
+      url: await store.signedReadUrl(PHOTO_BUCKET, p.path, PHOTO_VIEW_SECONDS),
+    })));
+  }
+
+  async function jobView(t, at, withUrls) {
+    const d = decorate(t, at);
+    return {
+      id: t.id, ticket_no: t.ticket_no, status: t.status, status_label: d.status_label,
+      urgency: t.urgency, issue_category: t.issue_category, description: t.description,
+      site_name: t.site_name, contact_person: t.contact_person, contact_phone: t.contact_phone,
+      address: t.address, pincode: t.pincode, latitude: t.latitude, longitude: t.longitude,
+      device_snapshot: t.device_snapshot, eta_at: t.eta_at, created_at: t.created_at,
+      accepted_at: t.accepted_at, arrived_at: t.arrived_at, work_done_at: t.work_done_at,
+      customer_response: t.customer_response, customer_reason: t.customer_reason,
+      photos: await photosOf(t.id, withUrls),
+    };
+  }
+
+  async function engineerJobs(eng) {
+    const at = now();
+    const declined = new Set(await store.listDeclinedTicketIds(eng.id));
+    const active = await store.listActive();
+    const offers = [];
+    for (const t of active) {
+      if (t.status !== 'open' && t.status !== 'reopened') continue;
+      if (t.engineer_id === eng.id || declined.has(t.id)) continue;
+      const cov = coverageOf(eng, siteOf(t));
+      if (cov) offers.push(offerView(t, cov, at));
+    }
+    offers.sort((a, b) => (a.urgency === 'urgent' ? 0 : 1) - (b.urgency === 'urgent' ? 0 : 1) || toMs(a.created_at) - toMs(b.created_at));
+    const mine = [];
+    for (const t of active.filter(x => x.engineer_id === eng.id && (WORKING.includes(x.status) || x.status === 'approved'))) {
+      mine.push(await jobView(t, at, false));
+    }
+    return { offers, mine, at: at.toISOString() };
+  }
+
+  async function engineerJob(eng, id) {
+    if (!UUID_RE.test(String(id))) throw httpError(400, 'Invalid job.');
+    const t = await store.getTicket(id);
+    if (!t || t.engineer_id !== eng.id) throw httpError(404, 'This job is not assigned to you.');
+    return jobView(t, now(), true);
+  }
+
+  async function engineerAct(eng, id, input) {
+    if (!UUID_RE.test(String(id))) throw httpError(400, 'Invalid job.');
+    const action = String(input.action || '');
+    const t = await store.getTicket(id);
+    if (!t) throw httpError(404, 'Job not found.');
+    const actor = engActor(eng);
+
+    if (action === 'accept') {
+      if (!['open', 'reopened'].includes(t.status)) throw httpError(409, 'This complaint was just taken by another engineer.');
+      if (t.engineer_id !== eng.id && !coverageOf(eng, siteOf(t))) throw httpError(403, 'This complaint is outside your area.');
+      try {
+        await act(id, { action: 'accept', engineer_id: eng.id, eta_minutes: input.eta_minutes }, actor);
+      } catch (err) {
+        if (err.status === 409) throw httpError(409, 'This complaint was just taken by another engineer.');
+        throw err;
+      }
+      return engineerJob(eng, id);
+    }
+
+    if (action === 'decline') {
+      if (!['open', 'reopened'].includes(t.status)) throw httpError(409, 'This complaint is no longer open.');
+      if (!coverageOf(eng, siteOf(t))) throw httpError(403, 'This complaint is outside your area.');
+      const reason = cleanText(input.reason, 300) || null;
+      await store.insertDecline({ ticket_id: id, engineer_id: eng.id, reason });
+      await store.insertEvent({
+        ticket_id: id, actor: actor.email, actor_role: 'engineer', action: 'declined',
+        from_status: t.status, to_status: t.status, note: reason, meta: { engineer_id: eng.id },
+      });
+      return { declined: true };
+    }
+
+    if (!ENGINEER_ACTIONS.includes(action)) throw httpError(400, 'That action is not available to engineers.');
+    if (t.engineer_id !== eng.id) throw httpError(403, 'This job is not assigned to you.');
+
+    if (action === 'work_done') {
+      const kinds = (await store.listPhotos(id)).map(p => p.kind);
+      if (!kinds.includes('before') || !kinds.includes('after')) {
+        throw httpError(400, 'Add at least one BEFORE photo and one AFTER photo before marking the work done.');
+      }
+    }
+    await act(id, { action, note: input.note }, actor);
+    return engineerJob(eng, id);
+  }
+
+  async function engineerPhotoUpload(eng, id, input) {
+    if (!UUID_RE.test(String(id))) throw httpError(400, 'Invalid job.');
+    const t = await store.getTicket(id);
+    if (!t || t.engineer_id !== eng.id) throw httpError(404, 'This job is not assigned to you.');
+    if (!WORKING.includes(t.status)) throw httpError(409, 'Photos can only be added while the job is in progress.');
+    const mime = String(input.content_type || '');
+    if (!PHOTO_MIMES[mime]) throw httpError(400, 'Attach a JPG, PNG or WebP photo.');
+    if (!PHOTO_KINDS.includes(input.kind)) throw httpError(400, 'Say whether this is a before, after or other photo.');
+    if ((await store.listPhotos(id)).length >= MAX_PHOTOS_PER_JOB) throw httpError(409, `A job can have at most ${MAX_PHOTOS_PER_JOB} photos.`);
+    const path = `jobs/${id}/${crypto.randomUUID()}.${PHOTO_MIMES[mime]}`;
+    const slot = await store.createSignedUpload(PHOTO_BUCKET, path);
+    return { path, token: slot.token, bucket: PHOTO_BUCKET, kind: input.kind, max_bytes: 8 * 1024 * 1024 };
+  }
+
+  async function engineerAddPhoto(eng, id, input) {
+    if (!UUID_RE.test(String(id))) throw httpError(400, 'Invalid job.');
+    const t = await store.getTicket(id);
+    if (!t || t.engineer_id !== eng.id) throw httpError(404, 'This job is not assigned to you.');
+    if (!WORKING.includes(t.status)) throw httpError(409, 'Photos can only be added while the job is in progress.');
+    const path = String(input.path || '');
+    const m = PHOTO_PATH_RE.exec(path);
+    if (!m || m[1] !== id) throw httpError(400, 'That photo does not belong to this job. Upload it again.');
+    if (!PHOTO_KINDS.includes(input.kind)) throw httpError(400, 'Say whether this is a before, after or other photo.');
+    if (!(await store.objectExists(PHOTO_BUCKET, path))) throw httpError(400, 'The photo was not found. Upload it again.');
+    const row = await store.insertPhoto({
+      ticket_id: id, engineer_id: eng.id, kind: input.kind, path,
+      mime: PHOTO_MIMES[input.mime] ? input.mime : null, caption: cleanText(input.caption, 120) || null,
+    });
+    await store.insertEvent({
+      ticket_id: id, actor: engActor(eng).email, actor_role: 'engineer', action: 'photo_added',
+      from_status: t.status, to_status: t.status, note: null, meta: { kind: input.kind },
+    });
+    return { id: row.id, kind: row.kind, caption: row.caption, created_at: row.created_at };
+  }
+
+  return {
+    create, act, list, detail, summary, runWatcher,
+    engineerJobs, engineerJob, engineerAct, engineerPhotoUpload, engineerAddPhoto,
+  };
 }
 
 // ── Supabase-backed store ────────────────────────────────────────────────────
@@ -440,6 +596,12 @@ function supabaseStore(sb) {
       .in('status', ['closed', 'cancelled']).order('closed_at', { ascending: false }).limit(n)),
     async insertEvent(e) { await one(sb.from('ticket_events').insert([e])); },
     listEvents: (ticketId) => one(sb.from('ticket_events').select('*').eq('ticket_id', ticketId).order('at', { ascending: true })),
+    insertPhoto: (row) => one(sb.from('ticket_photos').insert([row]).select().single()),
+    listPhotos: (ticketId) => one(sb.from('ticket_photos').select('*').eq('ticket_id', ticketId).order('created_at', { ascending: true })),
+    async insertDecline(row) { await one(sb.from('ticket_declines').upsert([row], { onConflict: 'ticket_id,engineer_id' })); },
+    async listDeclinedTicketIds(engineerId) {
+      return (await one(sb.from('ticket_declines').select('ticket_id').eq('engineer_id', engineerId))).map(r => r.ticket_id);
+    },
   };
 }
 

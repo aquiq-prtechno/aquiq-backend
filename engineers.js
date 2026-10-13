@@ -15,6 +15,7 @@ const express = require('express');
 const crypto = require('crypto');
 
 const PROOF_BUCKET = 'engineer-docs';
+const LOGIN_DOMAIN = 'engineers.prtechno.in';   // never receives mail; only gives each engineer a unique login name
 const PROOF_TYPES = {
   driving_licence: 'Driving licence',
   aadhaar: 'Aadhaar card',
@@ -103,7 +104,28 @@ function publicView(e) {
   return { ...e };   // admin-only API: includes ID reference
 }
 
-function createEngineerService(store, { now = () => new Date() } = {}) {
+// Readable one-time password: no look-alike characters (0/O, 1/l/I). Always has a letter and a digit.
+function generatePassword(len = 10) {
+  const letters = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz';
+  const digits = '23456789';
+  const all = letters + digits;
+  const pick = (set) => set[crypto.randomInt(set.length)];
+  const chars = [pick(letters), pick(digits)];
+  while (chars.length < len) chars.push(pick(all));
+  for (let i = chars.length - 1; i > 0; i--) {            // shuffle
+    const j = crypto.randomInt(i + 1);
+    [chars[i], chars[j]] = [chars[j], chars[i]];
+  }
+  return chars.join('');
+}
+const loginEmail = (code) => `${String(code).toLowerCase()}@${LOGIN_DOMAIN}`;
+
+function createEngineerService(store, { now = () => new Date(), auth = null } = {}) {
+  const needAuth = () => {
+    if (!auth) throw httpError(501, 'Engineer logins need the server\'s Supabase service key to be set.');
+    return auth;
+  };
+
   const validate = (input, { partial = false } = {}) => {
     const out = {};
     const need = (cond, msg) => { if (!cond) throw httpError(400, msg); };
@@ -168,7 +190,7 @@ function createEngineerService(store, { now = () => new Date() } = {}) {
   async function register(input, actor) {
     const v = validate(input || {});
 
-    if (v.proof_path && !(await store.proofExists(v.proof_path))) {
+    if (v.proof_path && !(await store.objectExists(PROOF_BUCKET, v.proof_path))) {
       throw httpError(400, 'The attached file was not found. Attach it again.');
     }
     const clash = await store.findEngineerConflict(v.phone, v.id_proof_ref, v.id_proof_type);
@@ -181,8 +203,22 @@ function createEngineerService(store, { now = () => new Date() } = {}) {
 
     const seq = await store.nextSeq(ENGINEER_SERIES, ENGINEER_START);
     const at = now().toISOString();
-    const row = await store.insertEngineer({
-      engineer_code: `${ENGINEER_SERIES}-${seq}`,
+    const code = `${ENGINEER_SERIES}-${seq}`;
+    const engineerId = crypto.randomUUID();
+
+    // Create the login first; if saving the record then fails, the login is removed again.
+    let authUserId = null;
+    let password = null;
+    if (auth) {
+      password = generatePassword();
+      const made = await auth.createUser({ email: loginEmail(code), password, engineerId, engineerCode: code });
+      authUserId = made.userId;
+    }
+    let row;
+    try {
+      row = await store.insertEngineer({
+      id: engineerId, auth_user_id: authUserId,
+      engineer_code: code,
       name: v.name, phone: v.phone, alt_phone: v.alt_phone ?? null,
       address: v.address ?? null, city: v.city ?? null, state: v.state ?? null,
       pincode: v.pincode, latitude: v.latitude ?? null, longitude: v.longitude ?? null,
@@ -192,13 +228,42 @@ function createEngineerService(store, { now = () => new Date() } = {}) {
       proof_uploaded_at: v.proof_path ? at : null,
       status: 'active',
       registered_by: actor.email, created_at: at, updated_at: at,
-    });
+      });
+    } catch (err) {
+      if (authUserId) { try { await auth.deleteUser(authUserId); } catch { /* best effort */ } }
+      throw err;
+    }
     await store.insertEngineerEvent({
       engineer_id: row.id, actor: actor.email, actor_role: actor.role,
       action: 'registered', note: null,
-      meta: { engineer_code: row.engineer_code, proof_attached: !!v.proof_path },
+      meta: { engineer_code: row.engineer_code, proof_attached: !!v.proof_path, login_created: !!authUserId },
     });
-    return publicView(row);
+    // The password is returned ONCE here and never stored in readable form.
+    return { ...publicView(row), initial_password: password };
+  }
+
+  // Issue (or re-issue) a login password. Also creates the login for an engineer
+  // registered before logins existed. The password is shown once and never kept.
+  async function issuePassword(id, actor) {
+    if (!UUID_RE.test(String(id))) throw httpError(400, 'Invalid engineer.');
+    const a = needAuth();
+    const e = await store.getEngineer(id);
+    if (!e) throw httpError(404, 'Engineer not found.');
+    if (e.status !== 'active') throw httpError(409, 'This engineer is blocked. Restore access first.');
+    const password = generatePassword();
+    let created = false;
+    if (e.auth_user_id) {
+      await a.setPassword(e.auth_user_id, password);
+    } else {
+      const made = await a.createUser({ email: loginEmail(e.engineer_code), password, engineerId: e.id, engineerCode: e.engineer_code });
+      await store.updateEngineer(id, { auth_user_id: made.userId, updated_at: now().toISOString() });
+      created = true;
+    }
+    await store.insertEngineerEvent({
+      engineer_id: id, actor: actor.email, actor_role: actor.role,
+      action: 'password_issued', note: null, meta: { login_created: created },
+    });
+    return { engineer_code: e.engineer_code, name: e.name, password };
   }
 
   async function list(filter) {
@@ -229,6 +294,10 @@ function createEngineerService(store, { now = () => new Date() } = {}) {
       ? { status, blocked_reason: note, blocked_at: at, blocked_by: actor.email, updated_at: at }
       : { status, blocked_reason: null, blocked_at: null, blocked_by: null, updated_at: at };
     const updated = await store.updateEngineer(id, patch);
+    // The engineer API also checks this status on every request; ending the login is a second lock.
+    if (auth && e.auth_user_id) {
+      try { await auth.setBanned(e.auth_user_id, status === 'blocked'); } catch (err) { console.error('[ENGINEERS] ban:', err.message); }
+    }
     await store.insertEngineerEvent({
       engineer_id: id, actor: actor.email, actor_role: actor.role,
       action: status === 'blocked' ? 'blocked' : 'restored', note: note || null, meta: null,
@@ -258,7 +327,7 @@ function createEngineerService(store, { now = () => new Date() } = {}) {
     if (!PROOF_MIMES[mime]) throw httpError(400, 'Attach a JPG, PNG or WebP photo, or a PDF.');
     const base = cleanText(input.filename, 80).replace(/\.[^.]*$/, '').replace(/[^A-Za-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'proof';
     const path = `engineers/${crypto.randomUUID()}/${base}.${PROOF_MIMES[mime]}`;
-    const slot = await store.createSignedUpload(path);
+    const slot = await store.createSignedUpload(PROOF_BUCKET, path);
     return { path, token: slot.token, bucket: PROOF_BUCKET, max_bytes: 5 * 1024 * 1024 };
   }
 
@@ -268,7 +337,7 @@ function createEngineerService(store, { now = () => new Date() } = {}) {
     if (!e) throw httpError(404, 'Engineer not found.');
     const path = String(input.proof_path || '');
     if (!PROOF_PATH_RE.test(path)) throw httpError(400, 'The attached file reference is not valid. Attach it again.');
-    if (!(await store.proofExists(path))) throw httpError(400, 'The attached file was not found. Attach it again.');
+    if (!(await store.objectExists(PROOF_BUCKET, path))) throw httpError(400, 'The attached file was not found. Attach it again.');
     const at = now().toISOString();
     const updated = await store.updateEngineer(id, {
       proof_path: path, proof_file_name: cleanText(input.proof_file_name, 120) || null,
@@ -288,7 +357,7 @@ function createEngineerService(store, { now = () => new Date() } = {}) {
     const e = await store.getEngineer(id);
     if (!e) throw httpError(404, 'Engineer not found.');
     if (!e.proof_path) throw httpError(404, 'No proof is attached for this engineer.');
-    const url = await store.signedReadUrl(e.proof_path, PROOF_URL_SECONDS);
+    const url = await store.signedReadUrl(PROOF_BUCKET, e.proof_path, PROOF_URL_SECONDS);
     await store.insertEngineerEvent({
       engineer_id: id, actor: actor.email, actor_role: actor.role,
       action: 'proof_viewed', note: null, meta: null,
@@ -297,7 +366,7 @@ function createEngineerService(store, { now = () => new Date() } = {}) {
   }
 
   return {
-    register, list, detail, update, createProofUpload, attachProof, proofUrl,
+    register, list, detail, update, createProofUpload, attachProof, proofUrl, issuePassword,
     block: (id, reason, actor) => setStatus(id, 'blocked', reason, actor),
     restore: (id, note, actor) => setStatus(id, 'active', note, actor),
   };
@@ -323,19 +392,19 @@ function supabaseEngineerStore(sb) {
       return one(sb.from('engineers').select('*').eq('id_proof_type', idType)
         .ilike('id_proof_ref', idProof.replace(/[%_]/g, '\\$&')).maybeSingle());
     },
-    async createSignedUpload(path) {
-      const { data, error } = await sb.storage.from(PROOF_BUCKET).createSignedUploadUrl(path);
+    async createSignedUpload(bucket, path) {
+      const { data, error } = await sb.storage.from(bucket).createSignedUploadUrl(path);
       if (error) throw fail(error);
       return data;
     },
-    async proofExists(path) {
+    async objectExists(bucket, path) {
       const i = path.lastIndexOf('/');
-      const { data, error } = await sb.storage.from(PROOF_BUCKET).list(path.slice(0, i), { search: path.slice(i + 1), limit: 5 });
+      const { data, error } = await sb.storage.from(bucket).list(path.slice(0, i), { search: path.slice(i + 1), limit: 5 });
       if (error) throw fail(error);
       return (data || []).some(f => f.name === path.slice(i + 1));
     },
-    async signedReadUrl(path, seconds) {
-      const { data, error } = await sb.storage.from(PROOF_BUCKET).createSignedUrl(path, seconds);
+    async signedReadUrl(bucket, path, seconds) {
+      const { data, error } = await sb.storage.from(bucket).createSignedUrl(path, seconds);
       if (error) throw fail(error);
       return data.signedUrl;
     },
@@ -344,7 +413,51 @@ function supabaseEngineerStore(sb) {
     listEngineers: () => one(sb.from('engineers').select('*').order('name', { ascending: true }).limit(1000)),
     listActiveEngineers: () => one(sb.from('engineers').select('*').eq('status', 'active').limit(1000)),
     async insertEngineerEvent(e) { await one(sb.from('engineer_events').insert([e])); },
+    async upsertDevice(row) {
+      await one(sb.from('engineer_devices').upsert([{ ...row, updated_at: new Date().toISOString() }], { onConflict: 'token' }));
+    },
     listEngineerEvents: (id) => one(sb.from('engineer_events').select('*').eq('engineer_id', id).order('at', { ascending: true })),
+  };
+}
+
+// ── Supabase Auth adapter: one login per engineer (needs the service key) ───
+
+function supabaseEngineerAuth(sb) {
+  const must = (error, what) => { if (error) { const e = httpError(500, `Could not ${what}.`); e.detail = error.message; throw e; } };
+  const merged = async (userId, extra) => {
+    const { data, error } = await sb.auth.admin.getUserById(userId);
+    must(error, 'read the engineer login');
+    return { ...(data.user.app_metadata || {}), ...extra };
+  };
+  return {
+    async createUser({ email, password, engineerId, engineerCode }) {
+      const { data, error } = await sb.auth.admin.createUser({
+        email, password, email_confirm: true,
+        app_metadata: { role: 'engineer', engineer_id: engineerId, engineer_code: engineerCode, must_change_password: true },
+      });
+      must(error, 'create the engineer login');
+      return { userId: data.user.id };
+    },
+    async setPassword(userId, password) {
+      const { error } = await sb.auth.admin.updateUserById(userId, {
+        password, app_metadata: await merged(userId, { must_change_password: true }),
+      });
+      must(error, 'set the password');
+    },
+    async changePassword(userId, password) {          // the engineer's own new password
+      const { error } = await sb.auth.admin.updateUserById(userId, {
+        password, app_metadata: await merged(userId, { must_change_password: false }),
+      });
+      must(error, 'change the password');
+    },
+    async setBanned(userId, banned) {
+      const { error } = await sb.auth.admin.updateUserById(userId, { ban_duration: banned ? '876000h' : 'none' });
+      must(error, banned ? 'end the engineer login' : 'restore the engineer login');
+    },
+    async deleteUser(userId) {
+      const { error } = await sb.auth.admin.deleteUser(userId);
+      must(error, 'remove the engineer login');
+    },
   };
 }
 
@@ -366,19 +479,24 @@ function createEngineersRouter(service) {
   };
 
   router.get('/', wrap(async (req) => ({ engineers: await service.list(req.query.filter) })));
-  router.post('/', wrap(async (req) => ({ engineer: await service.register(req.body || {}, actorOf(req)) })));
+  router.post('/', wrap(async (req) => {
+    const { initial_password, ...engineer } = await service.register(req.body || {}, actorOf(req));
+    return { engineer, initial_password };
+  }));
   router.post('/proof-upload', wrap((req) => service.createProofUpload(req.body || {})));
   router.get('/:id', wrap((req) => service.detail(req.params.id)));
   router.get('/:id/proof-url', wrap((req) => service.proofUrl(req.params.id, actorOf(req))));
   router.post('/:id/proof', wrap(async (req) => ({ engineer: await service.attachProof(req.params.id, req.body || {}, actorOf(req)) })));
   router.post('/:id/block', wrap(async (req) => ({ engineer: await service.block(req.params.id, (req.body || {}).reason, actorOf(req)) })));
   router.post('/:id/restore', wrap(async (req) => ({ engineer: await service.restore(req.params.id, (req.body || {}).note, actorOf(req)) })));
+  router.post('/:id/password', wrap((req) => service.issuePassword(req.params.id, actorOf(req))));
   router.post('/:id/update', wrap(async (req) => ({ engineer: await service.update(req.params.id, req.body || {}, actorOf(req)) })));
   return router;
 }
 
 module.exports = {
   ENGINEER_SERIES, ENGINEER_START, DEFAULT_RADIUS_KM, PROOF_TYPES, PROOF_MIMES,
-  coverageOf, rankEngineers, haversineKm, normPhone, normPincode,
+  coverageOf, rankEngineers, haversineKm, normPhone, normPincode, generatePassword, loginEmail, publicView,
+  supabaseEngineerAuth, PROOF_BUCKET,
   createEngineerService, supabaseEngineerStore, createEngineersRouter,
 };

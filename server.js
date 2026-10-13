@@ -1199,10 +1199,19 @@ const serviceStore = {
   ...ticketsModule.supabaseStore(supabase),
   ...engineersModule.supabaseEngineerStore(supabase),
 };
+// Engineer logins need the service key (creating users is a privileged Supabase action).
+const engineerAccounts = process.env.SUPABASE_SERVICE_KEY ? engineersModule.supabaseEngineerAuth(supabase) : null;
 const ticketService = ticketsModule.createTicketService(serviceStore);
-const engineerService = engineersModule.createEngineerService(serviceStore);
+const engineerService = engineersModule.createEngineerService(serviceStore, { auth: engineerAccounts });
 app.use('/admin/tickets', ticketsModule.createTicketsRouter(ticketService));
 app.use('/admin/engineers', engineersModule.createEngineersRouter(engineerService));
+
+// The engineer app (AQUIQ SE-TECH). Not under /admin: it has its own sign-in rules.
+const engineerApi = require('./engineerApi');
+app.use('/engineer', engineerApi.createEngineerApiRouter({
+  tickets: ticketService, store: serviceStore, accounts: engineerAccounts,
+  auth: engineerApi.createEngineerAuth(supabase, serviceStore),
+}));
 ticketsModule.startTicketWatcher(ticketService, cron);
 
 // ─── Start Server ─────────────────────────────────────────────────────────────
