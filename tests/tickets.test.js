@@ -4,6 +4,7 @@ const assert = require('assert');
 const http = require('http');
 const express = require('express');
 const T = require('../tickets');
+const E = require('../engineers');
 
 let passed = 0;
 const results = [];
@@ -17,6 +18,8 @@ function memStore(customers) {
   const counters = {};
   const tickets = [];
   const events = [];
+  const engineers = [];
+  const engineerEvents = [];
   let ev = 0;
   const copy = (o) => (o ? JSON.parse(JSON.stringify(o)) : o);
   return {
@@ -41,6 +44,21 @@ function memStore(customers) {
     async listClosed() { return copy(tickets.filter(t => ['closed', 'cancelled'].includes(t.status))); },
     async insertEvent(e) { events.push({ id: ++ev, at: new Date().toISOString(), ...copy(e) }); },
     async listEvents(id) { return copy(events.filter(e => e.ticket_id === id)); },
+    // ── engineers ──
+    engineers, engineerEvents,
+    async getEngineer(id) { return copy(engineers.find(e => e.id === id)) || null; },
+    async findEngineerConflict(phone, proof) {
+      return copy(engineers.find(e => e.phone === phone || e.id_proof_ref.toLowerCase() === proof.toLowerCase())) || null;
+    },
+    async insertEngineer(row) {
+      const e = { id: `00000000-0000-4000-9000-${String(engineers.length + 1).padStart(12, '0')}`, ...copy(row) };
+      engineers.push(e); return copy(e);
+    },
+    async updateEngineer(id, patch) { const e = engineers.find(x => x.id === id); Object.assign(e, copy(patch)); return copy(e); },
+    async listEngineers() { return copy(engineers); },
+    async listActiveEngineers() { return copy(engineers.filter(e => e.status === 'active')); },
+    async insertEngineerEvent(e) { engineerEvents.push(copy(e)); },
+    async listEngineerEvents(id) { return copy(engineerEvents.filter(e => e.engineer_id === id)); },
   };
 }
 
@@ -128,16 +146,20 @@ const ok400 = async (p, code, re) => {
   });
 
   // ── workflow ──
+  let ravi, amit;   // ids of two registered engineers, set by fresh()
   async function fresh() {
     const c = clock('2026-10-13T06:00:00Z');
     const store = memStore(customers);
+    const es = E.createEngineerService(store, { now: c.now });
+    ravi = (await es.register({ name: 'Ravi', phone: '9876543210', pincode: '122001', id_proof_ref: 'DL-1111' }, ADMIN)).id;
+    amit = (await es.register({ name: 'Amit', phone: '9876500000', pincode: '110001', id_proof_ref: 'DL-2222' }, ADMIN)).id;
     const svc = T.createTicketService(store, { now: c.now });
     const t = await svc.create({ customer_id: CUST, description: 'Low flow' }, ADMIN);
-    return { c, store, svc, id: t.id };
+    return { c, store, svc, es, id: t.id };
   }
   await test('happy path: open → accepted → arrived → work_done → approved → closed', async () => {
     const { svc, id, store } = await fresh();
-    let t = await svc.act(id, { action: 'accept', engineer_name: 'Ravi', engineer_phone: '9876543210', eta_minutes: 60 }, ADMIN);
+    let t = await svc.act(id, { action: 'accept', engineer_id: ravi, eta_minutes: 60 }, ADMIN);
     assert.strictEqual(t.status, 'accepted'); assert.strictEqual(t.engineer_name, 'Ravi'); assert.ok(t.eta_at);
     t = await svc.act(id, { action: 'arrive' }, ADMIN); assert.strictEqual(t.status, 'arrived');
     t = await svc.act(id, { action: 'work_done' }, ADMIN); assert.strictEqual(t.status, 'work_done');
@@ -149,9 +171,9 @@ const ok400 = async (p, code, re) => {
   });
   await test('rules: notes and engineer name are required where promised', async () => {
     const { svc, id } = await fresh();
-    await ok400(svc.act(id, { action: 'accept' }, ADMIN), 400, /engineer/i);
+    await ok400(svc.act(id, { action: 'accept' }, ADMIN), 400, /registered engineer/i);
     await ok400(svc.act(id, { action: 'cancel' }, ADMIN), 400, /note/i);
-    await svc.act(id, { action: 'accept', engineer_name: 'Ravi' }, ADMIN);
+    await svc.act(id, { action: 'accept', engineer_id: ravi }, ADMIN);
     await svc.act(id, { action: 'arrive' }, ADMIN);
     await svc.act(id, { action: 'work_done' }, ADMIN);
     await ok400(svc.act(id, { action: 'approve_on_behalf' }, ADMIN), 400, /note/i);
@@ -167,13 +189,13 @@ const ok400 = async (p, code, re) => {
   await test('rules: a closed ticket cannot change, only take notes', async () => {
     const { svc, id } = await fresh();
     await svc.act(id, { action: 'cancel', note: 'duplicate' }, ADMIN);
-    await ok400(svc.act(id, { action: 'accept', engineer_name: 'Ravi' }, ADMIN), 409);
+    await ok400(svc.act(id, { action: 'accept', engineer_id: ravi }, ADMIN), 409);
     const t = await svc.act(id, { action: 'note', note: 'confirmed duplicate' }, ADMIN);
     assert.strictEqual(t.status, 'cancelled');
   });
   await test('drop: engineer removed, ticket returns to open, 1-minute clock restarts', async () => {
     const { svc, id, c } = await fresh();
-    await svc.act(id, { action: 'accept', engineer_name: 'Ravi' }, ADMIN);
+    await svc.act(id, { action: 'accept', engineer_id: ravi }, ADMIN);
     c.add(3600);
     let t = await svc.act(id, { action: 'drop', note: 'vehicle broke down' }, ADMIN);
     assert.strictEqual(t.status, 'open'); assert.strictEqual(t.engineer_name, null);
@@ -184,19 +206,19 @@ const ok400 = async (p, code, re) => {
   });
   await test('not satisfied: reopens, flagged critical, then can be reassigned', async () => {
     const { svc, id } = await fresh();
-    await svc.act(id, { action: 'accept', engineer_name: 'Ravi' }, ADMIN);
+    await svc.act(id, { action: 'accept', engineer_id: ravi }, ADMIN);
     await svc.act(id, { action: 'arrive' }, ADMIN);
     await svc.act(id, { action: 'work_done' }, ADMIN);
     let t = await svc.act(id, { action: 'not_satisfied', note: 'still salty' }, ADMIN);
     assert.strictEqual(t.status, 'reopened'); assert.strictEqual(t.attention, 'customer_not_satisfied');
-    t = await svc.act(id, { action: 'accept', engineer_name: 'Amit' }, ADMIN);
+    t = await svc.act(id, { action: 'accept', engineer_id: amit }, ADMIN);
     assert.strictEqual(t.status, 'accepted'); assert.strictEqual(t.engineer_name, 'Amit');
   });
   await test('two admins act at the same instant: exactly one wins', async () => {
     const { svc, id } = await fresh();
     const r = await Promise.allSettled([
-      svc.act(id, { action: 'accept', engineer_name: 'Ravi' }, ADMIN),
-      svc.act(id, { action: 'accept', engineer_name: 'Amit' }, ADMIN),
+      svc.act(id, { action: 'accept', engineer_id: ravi }, ADMIN),
+      svc.act(id, { action: 'accept', engineer_id: amit }, ADMIN),
     ]);
     // In-memory store runs the awaits in sequence; whichever runs second must be refused.
     assert.strictEqual(r.filter(x => x.status === 'fulfilled').length, 1);
@@ -210,12 +232,12 @@ const ok400 = async (p, code, re) => {
     assert.strictEqual((await svc.list('active')).find(x => x.id === id).attention, null);
     c.add(2);
     assert.strictEqual((await svc.list('active')).find(x => x.id === id).attention, 'no_accept_1min');
-    const t = await svc.act(id, { action: 'accept', engineer_name: 'Ravi' }, ADMIN);
+    const t = await svc.act(id, { action: 'accept', engineer_id: ravi }, ADMIN);
     assert.strictEqual(t.attention, null);
   });
   await test('timers: engineer late after promised arrival', async () => {
     const { svc, id, c } = await fresh();
-    await svc.act(id, { action: 'accept', engineer_name: 'Ravi', eta_minutes: 30 }, ADMIN);
+    await svc.act(id, { action: 'accept', engineer_id: ravi, eta_minutes: 30 }, ADMIN);
     c.add(29 * 60);
     assert.strictEqual((await svc.list('active')).find(x => x.id === id).attention, null);
     c.add(2 * 60);
@@ -223,7 +245,7 @@ const ok400 = async (p, code, re) => {
   });
   await test('timers: customer silent 2 hours → warning, 8 hours → critical', async () => {
     const { svc, id, c } = await fresh();
-    await svc.act(id, { action: 'accept', engineer_name: 'Ravi' }, ADMIN);
+    await svc.act(id, { action: 'accept', engineer_id: ravi }, ADMIN);
     await svc.act(id, { action: 'arrive' }, ADMIN);
     await svc.act(id, { action: 'work_done' }, ADMIN);
     c.add(2 * 3600 - 1);
@@ -247,11 +269,13 @@ const ok400 = async (p, code, re) => {
   });
   await test('board order: critical first, then urgent, then oldest', async () => {
     const c = clock('2026-10-13T06:00:00Z');
-    const svc = T.createTicketService(memStore(customers), { now: c.now });
+    const store = memStore(customers);
+    const r = await E.createEngineerService(store, { now: c.now }).register({ name: 'R Kumar', phone: '9812345678', pincode: '122001', id_proof_ref: 'PAN-9999' }, ADMIN);
+    const svc = T.createTicketService(store, { now: c.now });
     const a = await svc.create({ customer_id: CUST, description: 'old normal' }, ADMIN);
     c.add(30);
     const b = await svc.create({ customer_id: CUST, description: 'urgent', urgency: 'urgent' }, ADMIN);
-    await svc.act(a.id, { action: 'accept', engineer_name: 'R' }, ADMIN);   // a no longer unaccepted
+    await svc.act(a.id, { action: 'accept', engineer_id: r.id }, ADMIN);   // a no longer unaccepted
     c.add(90);                                                              // b now >1 minute unaccepted
     const ids = (await svc.list('active')).map(t => t.id);
     assert.strictEqual(ids[0], b.id, 'the ticket with an active alert must be first');
@@ -261,19 +285,131 @@ const ok400 = async (p, code, re) => {
     c.add(61);
     let s = await svc.summary();
     assert.deepStrictEqual([s.open, s.needs_attention, s.in_progress], [1, 1, 0]);
-    await svc.act(id, { action: 'accept', engineer_name: 'R' }, ADMIN);
+    await svc.act(id, { action: 'accept', engineer_id: ravi }, ADMIN);
     s = await svc.summary();
     assert.deepStrictEqual([s.open, s.needs_attention, s.in_progress], [0, 0, 1]);
+  });
+
+  // ── engineer register ──
+  const EV = { name: 'Suresh Yadav', phone: '9811122233', pincode: '122001', id_proof_ref: 'DL-0420110012345' };
+  const mkEng = () => { const st = memStore(customers); return { st, es: E.createEngineerService(st, { now: clock('2026-10-13T06:00:00Z').now }) }; };
+
+  await test('engineers: registered with sequential IDs ENG-1001, ENG-1002', async () => {
+    const { es } = mkEng();
+    const a = await es.register(EV, ADMIN);
+    const b = await es.register({ ...EV, name: 'Mohan', phone: '9811122234', id_proof_ref: 'DL-2-XXXXX' }, ADMIN);
+    assert.deepStrictEqual([a.engineer_code, b.engineer_code], ['ENG-1001', 'ENG-1002']);
+    assert.strictEqual(a.status, 'active'); assert.strictEqual(a.radius_km, 30);
+  });
+  await test('engineers: bad input is refused', async () => {
+    const { es } = mkEng();
+    await ok400(es.register({ ...EV, phone: '12345' }, ADMIN), 400, /10-digit/);
+    await ok400(es.register({ ...EV, pincode: '12' }, ADMIN), 400, /pincode/i);
+    await ok400(es.register({ ...EV, id_proof_ref: '' }, ADMIN), 400, /ID document/);
+    await ok400(es.register({ ...EV, name: 'A' }, ADMIN), 400, /name/i);
+    await ok400(es.register({ ...EV, latitude: 51.5, longitude: -0.12 }, ADMIN), 400, /inside India/);
+    await ok400(es.register({ ...EV, latitude: 28.4 }, ADMIN), 400, /both/i);
+  });
+  await test('engineers: same phone or same ID document cannot be registered twice', async () => {
+    const { es } = mkEng();
+    await es.register(EV, ADMIN);
+    await ok400(es.register({ ...EV, name: 'Other', id_proof_ref: 'DL-NEW-999' }, ADMIN), 409, /phone/);
+    await ok400(es.register({ ...EV, phone: '9000000001', id_proof_ref: 'dl-0420110012345' }, ADMIN), 409, /ID document/);
+  });
+  await test('engineers: a blocked person can never register again', async () => {
+    const { es } = mkEng();
+    const e = await es.register(EV, ADMIN);
+    await ok400(es.block(e.id, '', ADMIN), 400, /reason/);
+    const b = await es.block(e.id, 'Did not turn up and lied about it', ADMIN);
+    assert.strictEqual(b.status, 'blocked'); assert.ok(b.blocked_at);
+    await ok400(es.register({ ...EV, name: 'Same Man New Name', id_proof_ref: 'DL-BRAND-NEW' }, ADMIN), 409, /BLOCKED/);
+    await ok400(es.register({ ...EV, phone: '9000000002' }, ADMIN), 409, /BLOCKED/);
+    assert.strictEqual((await es.list('active')).length, 0);
+    assert.strictEqual((await es.list('blocked')).length, 1);
+  });
+  await test('engineers: restore works; identity fields (phone, ID) cannot be edited', async () => {
+    const { es, st } = mkEng();
+    const e = await es.register(EV, ADMIN);
+    await es.block(e.id, 'test', ADMIN);
+    const r = await es.restore(e.id, 'cleared after review', ADMIN);
+    assert.strictEqual(r.status, 'active'); assert.strictEqual(r.blocked_reason, null);
+    await es.update(e.id, { phone: '9999999999', id_proof_ref: 'HACK', city: 'Gurgaon', radius_km: 40 }, ADMIN);
+    const after = (await es.detail(e.id)).engineer;
+    assert.strictEqual(after.phone, EV.phone); assert.strictEqual(after.id_proof_ref, EV.id_proof_ref);
+    assert.strictEqual(after.city, 'Gurgaon'); assert.strictEqual(after.radius_km, 40);
+    assert.deepStrictEqual(st.engineerEvents.map(x => x.action), ['registered', 'blocked', 'restored', 'updated']);
+  });
+  await test('coverage: same pincode, within radius, outside, and state-wide are told apart', async () => {
+    const site = { pincode: '122001', latitude: 28.45, longitude: 77.02 };
+    const mk = (o) => ({ id: o.name, engineer_code: 'E', status: 'active', radius_km: 30, state_wide: false, ...o });
+    const r = E.rankEngineers(site, [
+      mk({ name: 'samepin', pincode: '122001' }),
+      mk({ name: 'near', pincode: '122018', latitude: 28.5, longitude: 77.1 }),        // ~10 km
+      mk({ name: 'faraway', pincode: '500001', latitude: 17.38, longitude: 78.48 }),   // Hyderabad
+      mk({ name: 'wide', pincode: '500001', state_wide: true }),
+      { ...mk({ name: 'blocked', pincode: '122001' }), status: 'blocked' },
+    ]);
+    assert.deepStrictEqual(r.recommended.map(x => x.name), ['samepin', 'near']);
+    assert.strictEqual(r.recommended[0].basis, 'pincode');
+    assert.strictEqual(r.recommended[1].basis, 'distance');
+    assert.deepStrictEqual(r.statewide.map(x => x.name), ['wide']);
+    assert.deepStrictEqual(r.others.map(x => x.name), ['faraway']);
+    assert.strictEqual(r.matches, 2);
+  });
+
+  // ── assignment only from the register ──
+  await test('assign: a typed name is refused; an unknown ID is refused', async () => {
+    const { svc, id } = await fresh();
+    await ok400(svc.act(id, { action: 'accept', engineer_name: 'Someone Typed', engineer_phone: '9999999999' }, ADMIN), 400, /registered engineer/);
+    await ok400(svc.act(id, { action: 'accept', engineer_id: '33333333-3333-4333-8333-333333333333' }, ADMIN), 404, /not registered/);
+  });
+  await test('assign: a blocked engineer cannot be assigned', async () => {
+    const { svc, es, id } = await fresh();
+    await es.block(ravi, 'fraud', ADMIN);
+    await ok400(svc.act(id, { action: 'accept', engineer_id: ravi }, ADMIN), 409, /blocked/);
+  });
+  await test('assign: name, phone and ID are copied from the register; reassign works', async () => {
+    const { svc, id, store } = await fresh();
+    let t = await svc.act(id, { action: 'accept', engineer_id: ravi, engineer_name: 'IGNORED' }, ADMIN);
+    assert.strictEqual(t.engineer_name, 'Ravi'); assert.strictEqual(t.engineer_phone, '9876543210'); assert.strictEqual(t.engineer_id, ravi);
+    t = await svc.act(id, { action: 'reassign', engineer_id: amit, note: 'Ravi stuck in traffic' }, ADMIN);
+    assert.strictEqual(t.engineer_name, 'Amit'); assert.strictEqual(t.status, 'accepted');
+    assert.strictEqual(store.events[store.events.length - 1].meta.engineer_code, 'ENG-1002');
+  });
+  await test('detail offers registered engineers: matching area first, others after', async () => {
+    const { svc, id } = await fresh();
+    const d = await svc.detail(id);
+    assert.deepStrictEqual(d.candidates.recommended.map(x => x.name), ['Ravi']);
+    assert.deepStrictEqual(d.candidates.others.map(x => x.name), ['Amit']);
+  });
+  await test('no engineer covers the site: admin alerted at once, cleared once one is registered', async () => {
+    const c = clock('2026-10-13T06:00:00Z');
+    const store = memStore(customers);
+    const es = E.createEngineerService(store, { now: c.now });
+    const svc = T.createTicketService(store, { now: c.now });
+    await es.register({ name: 'Far Away', phone: '9811100000', pincode: '500001', id_proof_ref: 'DL-FAR-1' }, ADMIN);
+    const t = await svc.create({ customer_id: CUST, description: 'no water' }, ADMIN);
+    assert.strictEqual(t.attention, 'no_engineer_in_area');
+    assert.strictEqual(t.attention_severity, 'critical');
+    assert.strictEqual((await svc.summary()).needs_attention, 1);
+    await es.register({ name: 'Local Man', phone: '9811100001', pincode: '122001', id_proof_ref: 'DL-LOCAL-1' }, ADMIN);
+    assert.strictEqual((await svc.list('active'))[0].attention, null);
+    const far = (await es.list('all')).find(e => e.name === 'Far Away');
+    const done = await svc.act(t.id, { action: 'accept', engineer_id: far.id }, ADMIN);   // admin may appoint anyone registered
+    assert.strictEqual(done.engineer_name, 'Far Away');
   });
 
   // ── HTTP layer ──
   await test('HTTP: create, list, detail, action; bad id and bad action return clean errors', async () => {
     const store = memStore(customers);
-    const svc = T.createTicketService(store, { now: clock('2026-10-13T06:00:00Z').now });
+    const hc = clock('2026-10-13T06:00:00Z');
+    const svc = T.createTicketService(store, { now: hc.now });
+    const esvc = E.createEngineerService(store, { now: hc.now });
     const app = express();
     app.use(express.json());
     app.use((req, _res, next) => { req.admin = ADMIN; next(); });
     app.use('/admin/tickets', T.createTicketsRouter(svc));
+    app.use('/admin/engineers', E.createEngineersRouter(esvc));
     const server = await new Promise(r => { const s = app.listen(0, () => r(s)); });
     const base = `http://127.0.0.1:${server.address().port}/admin/tickets`;
     const j = async (path, opt) => { const r = await fetch(base + path, opt); return { s: r.status, b: await r.json() }; };
@@ -288,7 +424,11 @@ const ok400 = async (p, code, re) => {
       assert.strictEqual(d.s, 200); assert.ok(d.b.actions.some(a => a.action === 'accept'));
       assert.ok(!d.b.actions.some(a => a.action === 'approve'), 'customer-only action must not be offered');
       assert.strictEqual((await post('/' + id + '/action', { action: 'accept' })).s, 400);
-      assert.strictEqual((await post('/' + id + '/action', { action: 'accept', engineer_name: 'Ravi' })).s, 200);
+      assert.strictEqual((await post('/' + id + '/action', { action: 'accept', engineer_name: 'Typed Name' })).s, 400, 'a typed name must be refused');
+      const reg = await fetch(base.replace('tickets', 'engineers'), { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'Ravi', phone: '98765 43210', pincode: '122001', id_proof_ref: 'DL-1111' }) }).then(r => r.json());
+      assert.strictEqual(reg.engineer.engineer_code, 'ENG-1001');
+      assert.strictEqual((await post('/' + id + '/action', { action: 'accept', engineer_id: reg.engineer.id })).s, 200);
       assert.strictEqual((await j('/not-a-uuid')).s, 400);
       assert.strictEqual((await post('', { description: 'x' })).s, 400);
       assert.strictEqual((await j('/meta')).b.categories.length, 8);

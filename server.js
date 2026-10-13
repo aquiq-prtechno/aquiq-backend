@@ -1192,8 +1192,17 @@ app.post('/admin/team/:id/disable', adminAuth.requireOwner, async (req, res) => 
 // Lives under /admin/tickets, so the admin login guard registered above covers it.
 // The tickets tables are locked to the public key — only this server reads them.
 const ticketsModule = require('./tickets');
-const ticketService = ticketsModule.createTicketService(ticketsModule.supabaseStore(supabase));
+const engineersModule = require('./engineers');
+// One store object serves both: tickets and the engineer register share a counter
+// and the "is this engineer registered and active?" check.
+const serviceStore = {
+  ...ticketsModule.supabaseStore(supabase),
+  ...engineersModule.supabaseEngineerStore(supabase),
+};
+const ticketService = ticketsModule.createTicketService(serviceStore);
+const engineerService = engineersModule.createEngineerService(serviceStore);
 app.use('/admin/tickets', ticketsModule.createTicketsRouter(ticketService));
+app.use('/admin/engineers', engineersModule.createEngineersRouter(engineerService));
 ticketsModule.startTicketWatcher(ticketService, cron);
 
 // ─── Start Server ─────────────────────────────────────────────────────────────

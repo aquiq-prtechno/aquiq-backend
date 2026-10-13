@@ -11,6 +11,7 @@
 //   YY and MMDD are taken in India time (IST) when the complaint is raised.
 
 const express = require('express');
+const { rankEngineers } = require('./engineers');
 
 const SERIES = 'PMR';
 const MIDDLE = '117';
@@ -73,6 +74,7 @@ const ACTIONS = {
 };
 
 const ATTENTION = {
+  no_engineer_in_area:   { label: 'No registered engineer covers this area — register one', severity: 'critical' },
   no_accept_1min:        { label: 'No engineer has accepted (over 1 minute)', severity: 'critical' },
   customer_not_satisfied:{ label: 'Customer not satisfied — job reopened',      severity: 'critical' },
   engineer_late:         { label: 'Engineer is late for the promised arrival',  severity: 'warning' },
@@ -104,9 +106,11 @@ function formatTicketNo(year, seq, month, day) {
 function toMs(v) { return v ? new Date(v).getTime() : null; }
 
 // Which problem (if any) needs an admin's eyes right now.
-function attentionFor(t, now) {
+function attentionFor(t, now, ctx) {
   if (!t || TERMINAL.includes(t.status)) return null;
   const nowMs = now.getTime();
+  // Nobody registered covers this site: tell admin at once, not after a minute.
+  if ((t.status === 'open' || t.status === 'reopened') && ctx && ctx.matches === 0) return 'no_engineer_in_area';
   if (t.status === 'open') {
     const since = toMs(t.open_since) ?? toMs(t.created_at);
     if ((nowMs - since) / 1000 >= NO_ACCEPT_SECONDS) return 'no_accept_1min';
@@ -130,8 +134,8 @@ function availableActions(ticket) {
   return list;
 }
 
-function decorate(t, now) {
-  const att = attentionFor(t, now);
+function decorate(t, now, ctx) {
+  const att = attentionFor(t, now, ctx);
   return {
     ...t,
     status_label: STATUS_LABELS[t.status] || t.status,
@@ -179,7 +183,20 @@ function snapshotOf(customer, now) {
 
 // ── service (all rules live here; the store is the only thing that touches the DB) ──
 
+function siteOf(t) {
+  return { pincode: t.pincode, latitude: t.latitude, longitude: t.longitude };
+}
+
 function createTicketService(store, { now = () => new Date() } = {}) {
+  // How many registered, active engineers cover each ticket's site (live, never stale).
+  async function contextFor() {
+    const engineers = await store.listActiveEngineers();
+    return {
+      engineers,
+      of: (t) => ({ matches: rankEngineers(siteOf(t), engineers).matches }),
+    };
+  }
+
   async function create(input, actor) {
     const customerId = String(input.customer_id || '');
     if (!UUID_RE.test(customerId)) throw httpError(400, 'Choose a store for this complaint.');
@@ -224,7 +241,8 @@ function createTicketService(store, { now = () => new Date() } = {}) {
       note: `${category}${urgency === 'urgent' ? ' (urgent)' : ''}`,
       meta: { ticket_no: ticketNo, source: 'admin' },
     });
-    return decorate(row, at);
+    const ctx = await contextFor();
+    return decorate(row, at, ctx.of(row));
   }
 
   async function act(id, input, actor) {
@@ -246,7 +264,8 @@ function createTicketService(store, { now = () => new Date() } = {}) {
         ticket_id: ticket.id, actor: actor.email, actor_role: actor.role,
         action: 'note', from_status: ticket.status, to_status: ticket.status, note, meta: null,
       });
-      return decorate(ticket, at);
+      const c0 = await contextFor();
+      return decorate(ticket, at, c0.of(ticket));
     }
 
     const to = (TRANSITIONS[ticket.status] || {})[action];
@@ -257,18 +276,23 @@ function createTicketService(store, { now = () => new Date() } = {}) {
     const meta = {};
 
     if (def.needsEngineer) {
-      const name = cleanText(input.engineer_name, 120);
-      if (!name) throw httpError(400, 'Enter the engineer’s name.');
-      const phone = cleanText(input.engineer_phone, 20);
-      if (phone && !/^[0-9+\-\s]{6,20}$/.test(phone)) throw httpError(400, 'Engineer phone looks wrong.');
-      patch.engineer_name = name;
-      patch.engineer_phone = phone || null;
+      // Only a REGISTERED, ACTIVE engineer can take a complaint. Free-text names are not accepted.
+      const engId = String(input.engineer_id || '');
+      if (!UUID_RE.test(engId)) throw httpError(400, 'Choose a registered engineer. Register them first under Engineers.');
+      const eng = await store.getEngineer(engId);
+      if (!eng) throw httpError(404, 'That engineer is not registered.');
+      if (eng.status !== 'active') throw httpError(409, `${eng.name} is blocked and cannot be assigned.`);
+      patch.engineer_id = eng.id;
+      patch.engineer_name = eng.name;
+      patch.engineer_phone = eng.phone;
       patch.accepted_at = iso;
       patch.arrived_at = null;
       const mins = Number(input.eta_minutes);
       patch.eta_at = Number.isFinite(mins) && mins > 0 && mins <= 1440
         ? new Date(at.getTime() + mins * 60000).toISOString() : null;
-      meta.engineer = name;
+      meta.engineer = eng.name;
+      meta.engineer_id = eng.id;
+      meta.engineer_code = eng.engineer_code;
       if (patch.eta_at) meta.eta_at = patch.eta_at;
     }
 
@@ -279,7 +303,7 @@ function createTicketService(store, { now = () => new Date() } = {}) {
       case 'approve_on_behalf': patch.approved_at = iso; patch.customer_response = 'approved_by_admin'; patch.customer_reason = note; break;
       case 'not_satisfied':     patch.customer_response = 'not_satisfied'; patch.customer_reason = note; patch.work_done_at = null; break;
       case 'drop':
-        patch.engineer_name = null; patch.engineer_phone = null; patch.eta_at = null;
+        patch.engineer_id = null; patch.engineer_name = null; patch.engineer_phone = null; patch.eta_at = null;
         patch.open_since = iso; break;
       case 'close':             patch.closed_at = iso; patch.closed_reason = note || null; break;
       case 'cancel':            patch.closed_at = iso; patch.closed_reason = note; break;
@@ -287,7 +311,8 @@ function createTicketService(store, { now = () => new Date() } = {}) {
     }
 
     const merged = { ...ticket, ...patch };
-    const att = attentionFor(merged, at);
+    const ctx = await contextFor();
+    const att = attentionFor(merged, at, ctx.of(merged));
     patch.attention_reason = att;
     patch.attention_at = att ? (att === ticket.attention_reason ? ticket.attention_at : iso) : null;
 
@@ -300,7 +325,7 @@ function createTicketService(store, { now = () => new Date() } = {}) {
       action, from_status: ticket.status, to_status: to, note: note || null,
       meta: Object.keys(meta).length ? meta : null,
     });
-    return decorate(updated, at);
+    return decorate(updated, at, ctx.of(updated));
   }
 
   async function list(filter) {
@@ -309,7 +334,8 @@ function createTicketService(store, { now = () => new Date() } = {}) {
     if (filter === 'closed') rows = await store.listClosed(200);
     else if (filter === 'all') rows = [...(await store.listActive()), ...(await store.listClosed(100))];
     else rows = await store.listActive();
-    const decorated = rows.map(r => decorate(r, at));
+    const ctx = await contextFor();
+    const decorated = rows.map(r => decorate(r, at, ctx.of(r)));
     return filter === 'closed'
       ? decorated.sort((a, b) => toMs(b.closed_at || b.created_at) - toMs(a.closed_at || a.created_at))
       : sortForBoard(decorated);
@@ -321,12 +347,18 @@ function createTicketService(store, { now = () => new Date() } = {}) {
     const ticket = await store.getTicket(id);
     if (!ticket) throw httpError(404, 'Ticket not found.');
     const events = await store.listEvents(ticket.id);
-    return { ticket: decorate(ticket, at), events, actions: availableActions(ticket) };
+    const ctx = await contextFor();
+    const ranked = rankEngineers(siteOf(ticket), ctx.engineers);
+    return {
+      ticket: decorate(ticket, at, ctx.of(ticket)), events, actions: availableActions(ticket),
+      candidates: { recommended: ranked.recommended, statewide: ranked.statewide, others: ranked.others },
+    };
   }
 
   async function summary() {
     const at = now();
-    const active = (await store.listActive()).map(r => decorate(r, at));
+    const ctx = await contextFor();
+    const active = (await store.listActive()).map(r => decorate(r, at, ctx.of(r)));
     const todayStart = new Date(`${istParts(at).year}-${istParts(at).month}-${istParts(at).day}T00:00:00+05:30`);
     const closedToday = (await store.listClosed(300))
       .filter(t => t.status === 'closed' && toMs(t.closed_at) >= todayStart.getTime()).length;
@@ -352,8 +384,9 @@ function createTicketService(store, { now = () => new Date() } = {}) {
     const at = now();
     const iso = at.toISOString();
     let changed = 0;
+    const ctx = await contextFor();
     for (const t of await store.listActive()) {
-      const att = attentionFor(t, at);
+      const att = attentionFor(t, at, ctx.of(t));
       if ((att || null) === (t.attention_reason || null)) continue;
       const patch = { attention_reason: att, attention_at: att ? iso : null };
       const ok = await store.updateTicketIfStatus(t.id, t.status, patch);
