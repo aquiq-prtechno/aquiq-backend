@@ -332,7 +332,7 @@ function createTicketService(store, { now = () => new Date() } = {}) {
     const at = now();
     let rows;
     if (filter === 'closed') rows = await store.listClosed(200);
-    else if (filter === 'all') rows = [...(await store.listActive()), ...(await store.listClosed(100))];
+    else if (filter === 'all') rows = [...(await store.listActive()), ...(await store.listClosed(300))];   // 'all' also feeds search
     else rows = await store.listActive();
     const ctx = await contextFor();
     const decorated = rows.map(r => decorate(r, at, ctx.of(r)));

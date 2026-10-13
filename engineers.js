@@ -12,6 +12,21 @@
 
 const express = require('express');
 
+const crypto = require('crypto');
+
+const PROOF_BUCKET = 'engineer-docs';
+const PROOF_TYPES = {
+  driving_licence: 'Driving licence',
+  aadhaar: 'Aadhaar card',
+  pan: 'PAN card',
+  other: 'Other',
+};
+const PROOF_MIMES = {
+  'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'application/pdf': 'pdf',
+};
+const PROOF_PATH_RE = /^engineers\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/[A-Za-z0-9._-]{1,80}$/;
+const PROOF_URL_SECONDS = 300;
+
 const ENGINEER_SERIES = 'ENG';      // engineer IDs: ENG-1001, ENG-1002 ...
 const ENGINEER_START = 1001;
 const DEFAULT_RADIUS_KM = 30;
@@ -112,8 +127,21 @@ function createEngineerService(store, { now = () => new Date() } = {}) {
       need(out.pincode, 'Enter the 6-digit pincode where the engineer is based.');
     }
     if (!partial) {
+      out.id_proof_type = String(input.id_proof_type || '');
+      need(PROOF_TYPES[out.id_proof_type], 'Choose the ID document: Driving licence, Aadhaar card, PAN card or Other.');
+      out.id_proof_other = null;
+      if (out.id_proof_type === 'other') {
+        out.id_proof_other = cleanText(input.id_proof_other, 60);
+        need(out.id_proof_other.length >= 2, 'You chose Other. Write the name of the document.');
+      }
       out.id_proof_ref = cleanText(input.id_proof_ref, 60);
-      need(out.id_proof_ref.length >= 4, 'Enter the ID document reference (needed so a blocked person cannot register again).');
+      need(out.id_proof_ref.length >= 4, 'Enter the document number (needed so a blocked person cannot register again).');
+      if (input.proof_path) {
+        out.proof_path = String(input.proof_path);
+        need(PROOF_PATH_RE.test(out.proof_path), 'The attached file reference is not valid. Attach it again.');
+        out.proof_file_name = cleanText(input.proof_file_name, 120) || null;
+        out.proof_mime = PROOF_MIMES[input.proof_mime] ? input.proof_mime : null;
+      }
     }
     for (const k of ['address', 'city', 'state']) {
       if (input[k] !== undefined) out[k] = cleanText(input[k], k === 'address' ? 250 : 80) || null;
@@ -140,7 +168,10 @@ function createEngineerService(store, { now = () => new Date() } = {}) {
   async function register(input, actor) {
     const v = validate(input || {});
 
-    const clash = await store.findEngineerConflict(v.phone, v.id_proof_ref);
+    if (v.proof_path && !(await store.proofExists(v.proof_path))) {
+      throw httpError(400, 'The attached file was not found. Attach it again.');
+    }
+    const clash = await store.findEngineerConflict(v.phone, v.id_proof_ref, v.id_proof_type);
     if (clash) {
       const field = clash.phone === v.phone ? 'phone number' : 'ID document';
       throw httpError(409, clash.status === 'blocked'
@@ -156,12 +187,16 @@ function createEngineerService(store, { now = () => new Date() } = {}) {
       address: v.address ?? null, city: v.city ?? null, state: v.state ?? null,
       pincode: v.pincode, latitude: v.latitude ?? null, longitude: v.longitude ?? null,
       radius_km: v.radius_km ?? DEFAULT_RADIUS_KM, state_wide: v.state_wide ?? false,
-      id_proof_ref: v.id_proof_ref, status: 'active',
+      id_proof_type: v.id_proof_type, id_proof_other: v.id_proof_other, id_proof_ref: v.id_proof_ref,
+      proof_path: v.proof_path ?? null, proof_file_name: v.proof_file_name ?? null, proof_mime: v.proof_mime ?? null,
+      proof_uploaded_at: v.proof_path ? at : null,
+      status: 'active',
       registered_by: actor.email, created_at: at, updated_at: at,
     });
     await store.insertEngineerEvent({
       engineer_id: row.id, actor: actor.email, actor_role: actor.role,
-      action: 'registered', note: null, meta: { engineer_code: row.engineer_code },
+      action: 'registered', note: null,
+      meta: { engineer_code: row.engineer_code, proof_attached: !!v.proof_path },
     });
     return publicView(row);
   }
@@ -206,7 +241,7 @@ function createEngineerService(store, { now = () => new Date() } = {}) {
     const e = await store.getEngineer(id);
     if (!e) throw httpError(404, 'Engineer not found.');
     const v = validate(input || {}, { partial: true });
-    delete v.phone; delete v.id_proof_ref;            // identity fields are never edited
+    delete v.phone; delete v.id_proof_ref; delete v.id_proof_type; delete v.id_proof_other;   // identity fields are never edited
     if (!Object.keys(v).length) throw httpError(400, 'Nothing to change.');
     const updated = await store.updateEngineer(id, { ...v, updated_at: now().toISOString() });
     await store.insertEngineerEvent({
@@ -216,8 +251,53 @@ function createEngineerService(store, { now = () => new Date() } = {}) {
     return publicView(updated);
   }
 
+  // 1) the admin panel asks for a one-time upload slot, 2) uploads the file straight to
+  // private storage, 3) sends the returned path with the registration (or attaches it later).
+  async function createProofUpload(input) {
+    const mime = String(input.content_type || '');
+    if (!PROOF_MIMES[mime]) throw httpError(400, 'Attach a JPG, PNG or WebP photo, or a PDF.');
+    const base = cleanText(input.filename, 80).replace(/\.[^.]*$/, '').replace(/[^A-Za-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'proof';
+    const path = `engineers/${crypto.randomUUID()}/${base}.${PROOF_MIMES[mime]}`;
+    const slot = await store.createSignedUpload(path);
+    return { path, token: slot.token, bucket: PROOF_BUCKET, max_bytes: 5 * 1024 * 1024 };
+  }
+
+  async function attachProof(id, input, actor) {
+    if (!UUID_RE.test(String(id))) throw httpError(400, 'Invalid engineer.');
+    const e = await store.getEngineer(id);
+    if (!e) throw httpError(404, 'Engineer not found.');
+    const path = String(input.proof_path || '');
+    if (!PROOF_PATH_RE.test(path)) throw httpError(400, 'The attached file reference is not valid. Attach it again.');
+    if (!(await store.proofExists(path))) throw httpError(400, 'The attached file was not found. Attach it again.');
+    const at = now().toISOString();
+    const updated = await store.updateEngineer(id, {
+      proof_path: path, proof_file_name: cleanText(input.proof_file_name, 120) || null,
+      proof_mime: PROOF_MIMES[input.proof_mime] ? input.proof_mime : null,
+      proof_uploaded_at: at, updated_at: at,
+    });
+    await store.insertEngineerEvent({
+      engineer_id: id, actor: actor.email, actor_role: actor.role,
+      action: 'proof_attached', note: null, meta: { replaced: !!e.proof_path },
+    });
+    return publicView(updated);
+  }
+
+  // A short-lived private link. Every look at an ID document is written to the history.
+  async function proofUrl(id, actor) {
+    if (!UUID_RE.test(String(id))) throw httpError(400, 'Invalid engineer.');
+    const e = await store.getEngineer(id);
+    if (!e) throw httpError(404, 'Engineer not found.');
+    if (!e.proof_path) throw httpError(404, 'No proof is attached for this engineer.');
+    const url = await store.signedReadUrl(e.proof_path, PROOF_URL_SECONDS);
+    await store.insertEngineerEvent({
+      engineer_id: id, actor: actor.email, actor_role: actor.role,
+      action: 'proof_viewed', note: null, meta: null,
+    });
+    return { url, expires_in: PROOF_URL_SECONDS, file_name: e.proof_file_name, mime: e.proof_mime };
+  }
+
   return {
-    register, list, detail, update,
+    register, list, detail, update, createProofUpload, attachProof, proofUrl,
     block: (id, reason, actor) => setStatus(id, 'blocked', reason, actor),
     restore: (id, note, actor) => setStatus(id, 'active', note, actor),
   };
@@ -237,10 +317,27 @@ function supabaseEngineerStore(sb) {
 
   return {
     getEngineer: (id) => one(sb.from('engineers').select('*').eq('id', id).maybeSingle()),
-    async findEngineerConflict(phone, idProof) {
+    async findEngineerConflict(phone, idProof, idType) {
       const byPhone = await one(sb.from('engineers').select('*').eq('phone', phone).maybeSingle());
       if (byPhone) return byPhone;
-      return one(sb.from('engineers').select('*').ilike('id_proof_ref', idProof.replace(/[%_]/g, '\\$&')).maybeSingle());
+      return one(sb.from('engineers').select('*').eq('id_proof_type', idType)
+        .ilike('id_proof_ref', idProof.replace(/[%_]/g, '\\$&')).maybeSingle());
+    },
+    async createSignedUpload(path) {
+      const { data, error } = await sb.storage.from(PROOF_BUCKET).createSignedUploadUrl(path);
+      if (error) throw fail(error);
+      return data;
+    },
+    async proofExists(path) {
+      const i = path.lastIndexOf('/');
+      const { data, error } = await sb.storage.from(PROOF_BUCKET).list(path.slice(0, i), { search: path.slice(i + 1), limit: 5 });
+      if (error) throw fail(error);
+      return (data || []).some(f => f.name === path.slice(i + 1));
+    },
+    async signedReadUrl(path, seconds) {
+      const { data, error } = await sb.storage.from(PROOF_BUCKET).createSignedUrl(path, seconds);
+      if (error) throw fail(error);
+      return data.signedUrl;
     },
     insertEngineer: (row) => one(sb.from('engineers').insert([row]).select().single()),
     updateEngineer: (id, patch) => one(sb.from('engineers').update(patch).eq('id', id).select().single()),
@@ -270,7 +367,10 @@ function createEngineersRouter(service) {
 
   router.get('/', wrap(async (req) => ({ engineers: await service.list(req.query.filter) })));
   router.post('/', wrap(async (req) => ({ engineer: await service.register(req.body || {}, actorOf(req)) })));
+  router.post('/proof-upload', wrap((req) => service.createProofUpload(req.body || {})));
   router.get('/:id', wrap((req) => service.detail(req.params.id)));
+  router.get('/:id/proof-url', wrap((req) => service.proofUrl(req.params.id, actorOf(req))));
+  router.post('/:id/proof', wrap(async (req) => ({ engineer: await service.attachProof(req.params.id, req.body || {}, actorOf(req)) })));
   router.post('/:id/block', wrap(async (req) => ({ engineer: await service.block(req.params.id, (req.body || {}).reason, actorOf(req)) })));
   router.post('/:id/restore', wrap(async (req) => ({ engineer: await service.restore(req.params.id, (req.body || {}).note, actorOf(req)) })));
   router.post('/:id/update', wrap(async (req) => ({ engineer: await service.update(req.params.id, req.body || {}, actorOf(req)) })));
@@ -278,7 +378,7 @@ function createEngineersRouter(service) {
 }
 
 module.exports = {
-  ENGINEER_SERIES, ENGINEER_START, DEFAULT_RADIUS_KM,
+  ENGINEER_SERIES, ENGINEER_START, DEFAULT_RADIUS_KM, PROOF_TYPES, PROOF_MIMES,
   coverageOf, rankEngineers, haversineKm, normPhone, normPincode,
   createEngineerService, supabaseEngineerStore, createEngineersRouter,
 };

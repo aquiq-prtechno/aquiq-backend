@@ -47,9 +47,14 @@ function memStore(customers) {
     // ── engineers ──
     engineers, engineerEvents,
     async getEngineer(id) { return copy(engineers.find(e => e.id === id)) || null; },
-    async findEngineerConflict(phone, proof) {
-      return copy(engineers.find(e => e.phone === phone || e.id_proof_ref.toLowerCase() === proof.toLowerCase())) || null;
+    async findEngineerConflict(phone, proof, type) {
+      return copy(engineers.find(e => e.phone === phone ||
+        (e.id_proof_type === type && e.id_proof_ref.toLowerCase() === proof.toLowerCase()))) || null;
     },
+    files: new Set(),
+    async createSignedUpload(path) { return { path, token: 'upload-token' }; },
+    async proofExists(path) { return this.files.has(path); },
+    async signedReadUrl(path, secs) { return `https://signed.test/${path}?expires=${secs}`; },
     async insertEngineer(row) {
       const e = { id: `00000000-0000-4000-9000-${String(engineers.length + 1).padStart(12, '0')}`, ...copy(row) };
       engineers.push(e); return copy(e);
@@ -151,8 +156,8 @@ const ok400 = async (p, code, re) => {
     const c = clock('2026-10-13T06:00:00Z');
     const store = memStore(customers);
     const es = E.createEngineerService(store, { now: c.now });
-    ravi = (await es.register({ name: 'Ravi', phone: '9876543210', pincode: '122001', id_proof_ref: 'DL-1111' }, ADMIN)).id;
-    amit = (await es.register({ name: 'Amit', phone: '9876500000', pincode: '110001', id_proof_ref: 'DL-2222' }, ADMIN)).id;
+    ravi = (await es.register({ name: 'Ravi', phone: '9876543210', pincode: '122001', id_proof_type: 'driving_licence', id_proof_ref: 'DL-1111' }, ADMIN)).id;
+    amit = (await es.register({ name: 'Amit', phone: '9876500000', pincode: '110001', id_proof_type: 'driving_licence', id_proof_ref: 'DL-2222' }, ADMIN)).id;
     const svc = T.createTicketService(store, { now: c.now });
     const t = await svc.create({ customer_id: CUST, description: 'Low flow' }, ADMIN);
     return { c, store, svc, es, id: t.id };
@@ -270,7 +275,7 @@ const ok400 = async (p, code, re) => {
   await test('board order: critical first, then urgent, then oldest', async () => {
     const c = clock('2026-10-13T06:00:00Z');
     const store = memStore(customers);
-    const r = await E.createEngineerService(store, { now: c.now }).register({ name: 'R Kumar', phone: '9812345678', pincode: '122001', id_proof_ref: 'PAN-9999' }, ADMIN);
+    const r = await E.createEngineerService(store, { now: c.now }).register({ name: 'R Kumar', phone: '9812345678', pincode: '122001', id_proof_type: 'driving_licence', id_proof_ref: 'PAN-9999' }, ADMIN);
     const svc = T.createTicketService(store, { now: c.now });
     const a = await svc.create({ customer_id: CUST, description: 'old normal' }, ADMIN);
     c.add(30);
@@ -291,13 +296,13 @@ const ok400 = async (p, code, re) => {
   });
 
   // ── engineer register ──
-  const EV = { name: 'Suresh Yadav', phone: '9811122233', pincode: '122001', id_proof_ref: 'DL-0420110012345' };
+  const EV = { name: 'Suresh Yadav', phone: '9811122233', pincode: '122001', id_proof_type: 'driving_licence', id_proof_ref: 'DL-0420110012345' };
   const mkEng = () => { const st = memStore(customers); return { st, es: E.createEngineerService(st, { now: clock('2026-10-13T06:00:00Z').now }) }; };
 
   await test('engineers: registered with sequential IDs ENG-1001, ENG-1002', async () => {
     const { es } = mkEng();
     const a = await es.register(EV, ADMIN);
-    const b = await es.register({ ...EV, name: 'Mohan', phone: '9811122234', id_proof_ref: 'DL-2-XXXXX' }, ADMIN);
+    const b = await es.register({ ...EV, name: 'Mohan', phone: '9811122234', id_proof_type: 'driving_licence', id_proof_ref: 'DL-2-XXXXX' }, ADMIN);
     assert.deepStrictEqual([a.engineer_code, b.engineer_code], ['ENG-1001', 'ENG-1002']);
     assert.strictEqual(a.status, 'active'); assert.strictEqual(a.radius_km, 30);
   });
@@ -305,7 +310,7 @@ const ok400 = async (p, code, re) => {
     const { es } = mkEng();
     await ok400(es.register({ ...EV, phone: '12345' }, ADMIN), 400, /10-digit/);
     await ok400(es.register({ ...EV, pincode: '12' }, ADMIN), 400, /pincode/i);
-    await ok400(es.register({ ...EV, id_proof_ref: '' }, ADMIN), 400, /ID document/);
+    await ok400(es.register({ ...EV, id_proof_ref: '' }, ADMIN), 400, /document number/);
     await ok400(es.register({ ...EV, name: 'A' }, ADMIN), 400, /name/i);
     await ok400(es.register({ ...EV, latitude: 51.5, longitude: -0.12 }, ADMIN), 400, /inside India/);
     await ok400(es.register({ ...EV, latitude: 28.4 }, ADMIN), 400, /both/i);
@@ -313,7 +318,7 @@ const ok400 = async (p, code, re) => {
   await test('engineers: same phone or same ID document cannot be registered twice', async () => {
     const { es } = mkEng();
     await es.register(EV, ADMIN);
-    await ok400(es.register({ ...EV, name: 'Other', id_proof_ref: 'DL-NEW-999' }, ADMIN), 409, /phone/);
+    await ok400(es.register({ ...EV, name: 'Other', id_proof_type: 'driving_licence', id_proof_ref: 'DL-NEW-999' }, ADMIN), 409, /phone/);
     await ok400(es.register({ ...EV, phone: '9000000001', id_proof_ref: 'dl-0420110012345' }, ADMIN), 409, /ID document/);
   });
   await test('engineers: a blocked person can never register again', async () => {
@@ -322,7 +327,7 @@ const ok400 = async (p, code, re) => {
     await ok400(es.block(e.id, '', ADMIN), 400, /reason/);
     const b = await es.block(e.id, 'Did not turn up and lied about it', ADMIN);
     assert.strictEqual(b.status, 'blocked'); assert.ok(b.blocked_at);
-    await ok400(es.register({ ...EV, name: 'Same Man New Name', id_proof_ref: 'DL-BRAND-NEW' }, ADMIN), 409, /BLOCKED/);
+    await ok400(es.register({ ...EV, name: 'Same Man New Name', id_proof_type: 'driving_licence', id_proof_ref: 'DL-BRAND-NEW' }, ADMIN), 409, /BLOCKED/);
     await ok400(es.register({ ...EV, phone: '9000000002' }, ADMIN), 409, /BLOCKED/);
     assert.strictEqual((await es.list('active')).length, 0);
     assert.strictEqual((await es.list('blocked')).length, 1);
@@ -333,7 +338,7 @@ const ok400 = async (p, code, re) => {
     await es.block(e.id, 'test', ADMIN);
     const r = await es.restore(e.id, 'cleared after review', ADMIN);
     assert.strictEqual(r.status, 'active'); assert.strictEqual(r.blocked_reason, null);
-    await es.update(e.id, { phone: '9999999999', id_proof_ref: 'HACK', city: 'Gurgaon', radius_km: 40 }, ADMIN);
+    await es.update(e.id, { phone: '9999999999', id_proof_type: 'driving_licence', id_proof_ref: 'HACK', city: 'Gurgaon', radius_km: 40 }, ADMIN);
     const after = (await es.detail(e.id)).engineer;
     assert.strictEqual(after.phone, EV.phone); assert.strictEqual(after.id_proof_ref, EV.id_proof_ref);
     assert.strictEqual(after.city, 'Gurgaon'); assert.strictEqual(after.radius_km, 40);
@@ -355,6 +360,67 @@ const ok400 = async (p, code, re) => {
     assert.deepStrictEqual(r.statewide.map(x => x.name), ['wide']);
     assert.deepStrictEqual(r.others.map(x => x.name), ['faraway']);
     assert.strictEqual(r.matches, 2);
+  });
+
+  // ── ID document type and attached proof ──
+  const withFile = (st, name = 'licence.jpg') => { const p = `engineers/44444444-4444-4444-8444-444444444444/${name}`; st.files.add(p); return p; };
+
+  await test('proof: the document type must be chosen; Other needs a written name', async () => {
+    const { es } = mkEng();
+    await ok400(es.register({ ...EV, id_proof_type: '' }, ADMIN), 400, /Choose the ID document/);
+    await ok400(es.register({ ...EV, id_proof_type: 'passport-ish' }, ADMIN), 400, /Choose the ID document/);
+    await ok400(es.register({ ...EV, id_proof_type: 'other', id_proof_other: '' }, ADMIN), 400, /Write the name/);
+    const e = await es.register({ ...EV, id_proof_type: 'other', id_proof_other: 'Voter ID card' }, ADMIN);
+    assert.strictEqual(e.id_proof_type, 'other'); assert.strictEqual(e.id_proof_other, 'Voter ID card');
+    const p = await mkEng().es.register({ ...EV, id_proof_type: 'pan', id_proof_other: 'ignored' }, ADMIN);
+    assert.strictEqual(p.id_proof_other, null, 'the written name is kept only for type Other');
+  });
+  await test('proof: same number on a different document type is not a clash; same type is', async () => {
+    const { es } = mkEng();
+    await es.register({ ...EV, id_proof_type: 'pan', id_proof_ref: 'ABCDE1234F' }, ADMIN);
+    const ok = await es.register({ ...EV, phone: '9000000010', id_proof_type: 'driving_licence', id_proof_ref: 'ABCDE1234F' }, ADMIN);
+    assert.ok(ok.id);
+    await ok400(es.register({ ...EV, phone: '9000000011', id_proof_type: 'pan', id_proof_ref: 'abcde1234f' }, ADMIN), 409, /ID document/);
+  });
+  await test('proof: only photos and PDFs can be attached; the upload path is unguessable and safe', async () => {
+    const { es } = mkEng();
+    await ok400(es.createProofUpload({ filename: 'virus.exe', content_type: 'application/x-msdownload' }), 400, /JPG, PNG/);
+    const up = await es.createProofUpload({ filename: '../../etc/My Licence (front).JPG', content_type: 'image/jpeg' });
+    assert.match(up.path, /^engineers\/[0-9a-f-]{36}\/[A-Za-z0-9._-]+\.jpg$/);
+    assert.ok(!up.path.includes('..') && !up.path.includes(' '));
+    assert.strictEqual(up.max_bytes, 5 * 1024 * 1024);
+  });
+  await test('proof: registering with a file that was never uploaded, or a forged path, is refused', async () => {
+    const { es } = mkEng();
+    await ok400(es.register({ ...EV, proof_path: 'engineers/44444444-4444-4444-8444-444444444444/missing.jpg' }, ADMIN), 400, /not found/);
+    await ok400(es.register({ ...EV, proof_path: '../secrets/other.pdf' }, ADMIN), 400, /not valid/);
+    await ok400(es.register({ ...EV, proof_path: 'engineers/not-a-uuid/x.jpg' }, ADMIN), 400, /not valid/);
+  });
+  await test('proof: attached at registration, viewed through a short private link that is logged', async () => {
+    const { es, st } = mkEng();
+    const e = await es.register({ ...EV, proof_path: withFile(st), proof_file_name: 'licence.jpg', proof_mime: 'image/jpeg' }, ADMIN);
+    assert.strictEqual(e.proof_file_name, 'licence.jpg'); assert.ok(e.proof_uploaded_at);
+    const v = await es.proofUrl(e.id, ADMIN);
+    assert.match(v.url, /^https:\/\/signed\.test\/engineers\//); assert.strictEqual(v.expires_in, 300);
+    assert.deepStrictEqual(st.engineerEvents.map(x => x.action), ['registered', 'proof_viewed']);
+  });
+  await test('proof: can be attached later; "no proof" is reported cleanly', async () => {
+    const { es, st } = mkEng();
+    const e = await es.register(EV, ADMIN);
+    assert.strictEqual(e.proof_path, null);
+    await ok400(es.proofUrl(e.id, ADMIN), 404, /No proof/);
+    const after = await es.attachProof(e.id, { proof_path: withFile(st, 'later.pdf'), proof_file_name: 'later.pdf', proof_mime: 'application/pdf' }, ADMIN);
+    assert.strictEqual(after.proof_mime, 'application/pdf');
+    assert.ok((await es.proofUrl(e.id, ADMIN)).url);
+    await ok400(es.attachProof(e.id, { proof_path: 'engineers/44444444-4444-4444-8444-444444444444/gone.pdf' }, ADMIN), 400, /not found/);
+  });
+  await test('proof: the document type and number cannot be edited afterwards', async () => {
+    const { es } = mkEng();
+    const e = await es.register(EV, ADMIN);
+    await es.update(e.id, { id_proof_type: 'pan', id_proof_other: 'x', id_proof_ref: 'CHANGED', city: 'Delhi' }, ADMIN);
+    const after = (await es.detail(e.id)).engineer;
+    assert.strictEqual(after.id_proof_type, 'driving_licence'); assert.strictEqual(after.id_proof_ref, EV.id_proof_ref);
+    assert.strictEqual(after.city, 'Delhi');
   });
 
   // ── assignment only from the register ──
@@ -387,12 +453,12 @@ const ok400 = async (p, code, re) => {
     const store = memStore(customers);
     const es = E.createEngineerService(store, { now: c.now });
     const svc = T.createTicketService(store, { now: c.now });
-    await es.register({ name: 'Far Away', phone: '9811100000', pincode: '500001', id_proof_ref: 'DL-FAR-1' }, ADMIN);
+    await es.register({ name: 'Far Away', phone: '9811100000', pincode: '500001', id_proof_type: 'driving_licence', id_proof_ref: 'DL-FAR-1' }, ADMIN);
     const t = await svc.create({ customer_id: CUST, description: 'no water' }, ADMIN);
     assert.strictEqual(t.attention, 'no_engineer_in_area');
     assert.strictEqual(t.attention_severity, 'critical');
     assert.strictEqual((await svc.summary()).needs_attention, 1);
-    await es.register({ name: 'Local Man', phone: '9811100001', pincode: '122001', id_proof_ref: 'DL-LOCAL-1' }, ADMIN);
+    await es.register({ name: 'Local Man', phone: '9811100001', pincode: '122001', id_proof_type: 'driving_licence', id_proof_ref: 'DL-LOCAL-1' }, ADMIN);
     assert.strictEqual((await svc.list('active'))[0].attention, null);
     const far = (await es.list('all')).find(e => e.name === 'Far Away');
     const done = await svc.act(t.id, { action: 'accept', engineer_id: far.id }, ADMIN);   // admin may appoint anyone registered
@@ -426,7 +492,7 @@ const ok400 = async (p, code, re) => {
       assert.strictEqual((await post('/' + id + '/action', { action: 'accept' })).s, 400);
       assert.strictEqual((await post('/' + id + '/action', { action: 'accept', engineer_name: 'Typed Name' })).s, 400, 'a typed name must be refused');
       const reg = await fetch(base.replace('tickets', 'engineers'), { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: 'Ravi', phone: '98765 43210', pincode: '122001', id_proof_ref: 'DL-1111' }) }).then(r => r.json());
+        body: JSON.stringify({ name: 'Ravi', phone: '98765 43210', pincode: '122001', id_proof_type: 'driving_licence', id_proof_ref: 'DL-1111' }) }).then(r => r.json());
       assert.strictEqual(reg.engineer.engineer_code, 'ENG-1001');
       assert.strictEqual((await post('/' + id + '/action', { action: 'accept', engineer_id: reg.engineer.id })).s, 200);
       assert.strictEqual((await j('/not-a-uuid')).s, 400);
