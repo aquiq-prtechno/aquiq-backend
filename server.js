@@ -1195,9 +1195,11 @@ const ticketsModule = require('./tickets');
 const engineersModule = require('./engineers');
 // One store object serves both: tickets and the engineer register share a counter
 // and the "is this engineer registered and active?" check.
+const reportsModule = require('./reports');
 const serviceStore = {
   ...ticketsModule.supabaseStore(supabase),
   ...engineersModule.supabaseEngineerStore(supabase),
+  ...reportsModule.supabaseReportStore(supabase),
 };
 // Engineer logins need the service key (creating users is a privileged Supabase action).
 const engineerAccounts = process.env.SUPABASE_SERVICE_KEY ? engineersModule.supabaseEngineerAuth(supabase) : null;
@@ -1205,11 +1207,16 @@ const ticketService = ticketsModule.createTicketService(serviceStore);
 const engineerService = engineersModule.createEngineerService(serviceStore, { auth: engineerAccounts });
 app.use('/admin/tickets', ticketsModule.createTicketsRouter(ticketService));
 app.use('/admin/engineers', engineersModule.createEngineersRouter(engineerService));
+const reportService = reportsModule.createReportService(serviceStore, ticketService, {
+  mailer: reportsModule.createMailer(),
+  fetchBytes: async (url) => Buffer.from((await axios.get(url, { responseType: 'arraybuffer', timeout: 20000 })).data),
+});
+app.use('/admin/service-reports', require('./reports').createReportsAdminRouter(reportService));
 
 // The engineer app (AQUIQ SE-TECH). Not under /admin: it has its own sign-in rules.
 const engineerApi = require('./engineerApi');
 app.use('/engineer', engineerApi.createEngineerApiRouter({
-  tickets: ticketService, store: serviceStore, accounts: engineerAccounts,
+  tickets: ticketService, store: serviceStore, accounts: engineerAccounts, reports: reportService,
   auth: engineerApi.createEngineerAuth(supabase, serviceStore),
 }));
 ticketsModule.startTicketWatcher(ticketService, cron);

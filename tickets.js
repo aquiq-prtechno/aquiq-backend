@@ -26,9 +26,13 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 const PHOTO_BUCKET = 'job-photos';
 const PHOTO_KINDS = ['before', 'after', 'other'];
-const PHOTO_MIMES = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
-const PHOTO_PATH_RE = /^jobs\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/[0-9a-f-]{36}\.(jpg|png|webp)$/;
-const MAX_PHOTOS_PER_JOB = 20;
+const PHOTO_MIMES = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'video/mp4': 'mp4', 'video/quicktime': 'mov' };
+const VIDEO_EXTS = ['mp4', 'mov'];
+const MAX_VIDEOS_PER_JOB = 3;
+const MAX_PHOTO_BYTES = 8 * 1024 * 1024;
+const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
+const PHOTO_PATH_RE = /^jobs\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/[0-9a-f-]{36}\.(jpg|png|webp|mp4|mov)$/;
+const MAX_PHOTOS_PER_JOB = 20;   // photos; videos are counted separately
 const PHOTO_VIEW_SECONDS = 600;
 const ENGINEER_ACTIONS = ['arrive', 'work_done', 'drop', 'note'];
 const WORKING = ['accepted', 'arrived', 'work_done', 'reopened'];
@@ -62,7 +66,7 @@ const TRANSITIONS = {
   open:      { accept: 'accepted', cancel: 'cancelled' },
   accepted:  { arrive: 'arrived', reassign: 'accepted', drop: 'open', cancel: 'cancelled' },
   arrived:   { work_done: 'work_done', reassign: 'accepted', drop: 'open', cancel: 'cancelled' },
-  work_done: { approve: 'approved', approve_on_behalf: 'approved', not_satisfied: 'reopened', cancel: 'cancelled' },
+  work_done: { approve: 'approved', approve_on_behalf: 'approved', engineer_override: 'approved', not_satisfied: 'reopened', cancel: 'cancelled' },
   reopened:  { accept: 'accepted', cancel: 'cancelled' },
   approved:  { close: 'closed' },
   closed:    {},
@@ -76,6 +80,7 @@ const ACTIONS = {
   work_done:         { label: 'Mark work done' },
   approve:           { label: 'Customer approved', customerOnly: true },
   approve_on_behalf: { label: 'Approve on customer’s behalf', needsNote: true },
+  engineer_override: { label: 'Engineer proceeded without customer approval', needsNote: true, engineerOnly: true },
   not_satisfied:     { label: 'Customer not satisfied', needsNote: true },
   drop:              { label: 'Engineer dropped / unable', needsNote: true },
   close:             { label: 'Close ticket' },
@@ -113,6 +118,12 @@ function formatTicketNo(year, seq, month, day) {
   return `${SERIES}${String(year % 100).padStart(2, '0')}${MIDDLE}${seq}${month}${day}`;
 }
 
+// 'photo' or 'video', from the stored row (or, for older rows, from the file extension).
+function mediaOf(p) {
+  if (p.media_type) return p.media_type;
+  return VIDEO_EXTS.includes(String(p.path || '').split('.').pop()) ? 'video' : 'photo';
+}
+
 function toMs(v) { return v ? new Date(v).getTime() : null; }
 
 // Which problem (if any) needs an admin's eyes right now.
@@ -138,7 +149,7 @@ function attentionFor(t, now, ctx) {
 function availableActions(ticket) {
   const next = TRANSITIONS[ticket.status] || {};
   const list = Object.keys(next)
-    .filter(a => !ACTIONS[a].customerOnly)     // the customer's own approval comes from the app
+    .filter(a => !ACTIONS[a].customerOnly && !ACTIONS[a].engineerOnly)     // the customer's own approval comes from the app
     .map(a => ({ action: a, label: ACTIONS[a].label, needs_note: !!ACTIONS[a].needsNote, needs_engineer: !!ACTIONS[a].needsEngineer }));
   list.push({ action: 'note', label: ACTIONS.note.label, needs_note: true, needs_engineer: false });
   return list;
@@ -262,7 +273,7 @@ function createTicketService(store, { now = () => new Date() } = {}) {
 
     const action = String(input.action || '');
     const def = ACTIONS[action];
-    if (!def || def.customerOnly) throw httpError(400, 'Unknown action.');
+    if (!def || def.customerOnly || (def.engineerOnly && actor.role !== 'engineer')) throw httpError(400, 'Unknown action.');
 
     const note = cleanText(input.note, 1000);
     const at = now();
@@ -311,6 +322,7 @@ function createTicketService(store, { now = () => new Date() } = {}) {
       case 'work_done':         patch.work_done_at = iso; break;
       case 'approve':           patch.approved_at = iso; patch.customer_response = 'approved'; break;
       case 'approve_on_behalf': patch.approved_at = iso; patch.customer_response = 'approved_by_admin'; patch.customer_reason = note; break;
+      case 'engineer_override': patch.approved_at = iso; patch.customer_response = 'bypassed_by_engineer'; patch.customer_reason = note; break;
       case 'not_satisfied':     patch.customer_response = 'not_satisfied'; patch.customer_reason = note; patch.work_done_at = null; break;
       case 'drop':
         patch.engineer_id = null; patch.engineer_name = null; patch.engineer_phone = null; patch.eta_at = null;
@@ -430,9 +442,9 @@ function createTicketService(store, { now = () => new Date() } = {}) {
 
   async function photosOf(ticketId, withUrls) {
     const rows = await store.listPhotos(ticketId);
-    if (!withUrls) return rows.map(p => ({ id: p.id, kind: p.kind, caption: p.caption, created_at: p.created_at }));
+    if (!withUrls) return rows.map(p => ({ id: p.id, kind: p.kind, media_type: mediaOf(p), caption: p.caption, created_at: p.created_at }));
     return Promise.all(rows.map(async (p) => ({
-      id: p.id, kind: p.kind, caption: p.caption, created_at: p.created_at,
+      id: p.id, kind: p.kind, media_type: mediaOf(p), caption: p.caption, created_at: p.created_at,
       url: await store.signedReadUrl(PHOTO_BUCKET, p.path, PHOTO_VIEW_SECONDS),
     })));
   }
@@ -527,12 +539,18 @@ function createTicketService(store, { now = () => new Date() } = {}) {
     if (!t || t.engineer_id !== eng.id) throw httpError(404, 'This job is not assigned to you.');
     if (!WORKING.includes(t.status)) throw httpError(409, 'Photos can only be added while the job is in progress.');
     const mime = String(input.content_type || '');
-    if (!PHOTO_MIMES[mime]) throw httpError(400, 'Attach a JPG, PNG or WebP photo.');
+    if (!PHOTO_MIMES[mime]) throw httpError(400, 'Attach a JPG, PNG or WebP photo, or an MP4 / MOV video.');
     if (!PHOTO_KINDS.includes(input.kind)) throw httpError(400, 'Say whether this is a before, after or other photo.');
-    if ((await store.listPhotos(id)).length >= MAX_PHOTOS_PER_JOB) throw httpError(409, `A job can have at most ${MAX_PHOTOS_PER_JOB} photos.`);
+    const isVideo = VIDEO_EXTS.includes(PHOTO_MIMES[mime]);
+    const existing = await store.listPhotos(id);
+    const videos = existing.filter(p => mediaOf(p) === 'video').length;
+    const photos = existing.length - videos;
+    if (isVideo && videos >= MAX_VIDEOS_PER_JOB) throw httpError(409, `A job can have at most ${MAX_VIDEOS_PER_JOB} videos.`);
+    if (!isVideo && photos >= MAX_PHOTOS_PER_JOB) throw httpError(409, `A job can have at most ${MAX_PHOTOS_PER_JOB} photos.`);
     const path = `jobs/${id}/${crypto.randomUUID()}.${PHOTO_MIMES[mime]}`;
     const slot = await store.createSignedUpload(PHOTO_BUCKET, path);
-    return { path, token: slot.token, bucket: PHOTO_BUCKET, kind: input.kind, max_bytes: 8 * 1024 * 1024 };
+    return { path, token: slot.token, bucket: PHOTO_BUCKET, kind: input.kind, media_type: isVideo ? 'video' : 'photo',
+      max_bytes: isVideo ? MAX_VIDEO_BYTES : MAX_PHOTO_BYTES };
   }
 
   async function engineerAddPhoto(eng, id, input) {
@@ -547,13 +565,14 @@ function createTicketService(store, { now = () => new Date() } = {}) {
     if (!(await store.objectExists(PHOTO_BUCKET, path))) throw httpError(400, 'The photo was not found. Upload it again.');
     const row = await store.insertPhoto({
       ticket_id: id, engineer_id: eng.id, kind: input.kind, path,
+      media_type: VIDEO_EXTS.includes(m[2]) ? 'video' : 'photo',
       mime: PHOTO_MIMES[input.mime] ? input.mime : null, caption: cleanText(input.caption, 120) || null,
     });
     await store.insertEvent({
       ticket_id: id, actor: engActor(eng).email, actor_role: 'engineer', action: 'photo_added',
       from_status: t.status, to_status: t.status, note: null, meta: { kind: input.kind },
     });
-    return { id: row.id, kind: row.kind, caption: row.caption, created_at: row.created_at };
+    return { id: row.id, kind: row.kind, media_type: mediaOf(row), caption: row.caption, created_at: row.created_at };
   }
 
   return {
@@ -642,6 +661,6 @@ function startTicketWatcher(service, cron) {
 
 module.exports = {
   SERIES, MIDDLE, START_SEQ, CATEGORIES, TRANSITIONS, ACTIONS,
-  istParts, formatTicketNo, attentionFor, availableActions, snapshotOf,
+  istParts, formatTicketNo, attentionFor, availableActions, snapshotOf, mediaOf, PHOTO_BUCKET, ONLINE_WINDOW_MS,
   createTicketService, supabaseStore, createTicketsRouter, startTicketWatcher,
 };

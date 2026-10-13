@@ -42,7 +42,7 @@ function strongEnough(pw) {
   return typeof pw === 'string' && pw.length >= 8 && pw.length <= 72 && /[A-Za-z]/.test(pw) && /\d/.test(pw);
 }
 
-function createEngineerApiRouter({ tickets, store, auth, accounts }) {
+function createEngineerApiRouter({ tickets, store, auth, accounts, reports }) {
   const router = express.Router();
   router.use((_req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
 
@@ -90,6 +90,12 @@ function createEngineerApiRouter({ tickets, store, auth, accounts }) {
   }));
   router.post('/jobs/:id/photo-upload', guard(), wrap((req) => tickets.engineerPhotoUpload(req.engineer, req.params.id, req.body || {})));
   router.post('/jobs/:id/photos', guard(), wrap(async (req) => ({ photo: await tickets.engineerAddPhoto(req.engineer, req.params.id, req.body || {}) })));
+
+  // service report: the form (with the unit's readings filled in) and filing it
+  if (reports) {
+    router.get('/jobs/:id/report', guard(), wrap((req) => reports.form(req.engineer, req.params.id)));
+    router.post('/jobs/:id/report', guard(), wrap((req) => reports.submit(req.engineer, req.params.id, req.body || {})));
+  }
 
   // the phone registers its push-notification token here
   router.post('/device', guard(), wrap(async (req) => {
