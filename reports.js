@@ -87,6 +87,14 @@ function istStamp(at) {
   return d;
 }
 
+// "13/10/26, 15:42" in India time: the stamp printed at the top of every page.
+function stampText(at) {
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Kolkata', day: '2-digit', month: '2-digit', year: '2-digit',
+    hour: '2-digit', minute: '2-digit', hour12: false,
+  }).format(at);
+}
+
 // ── PDF ──────────────────────────────────────────────────────────────────────
 
 const INK = '#111111';
@@ -96,7 +104,7 @@ const AMBER = '#C25A00';
 function renderPdf(report, images) {
   const PDFDocument = require('pdfkit');
   return new Promise((resolve, reject) => {
-    const doc = new PDFDocument({ size: 'A4', margin: 40, info: { Title: `Service Report ${report.report_no}`, Author: 'PR TECHNO / AQUIQ' } });
+    const doc = new PDFDocument({ size: 'A4', margin: 40, bufferPages: true, info: { Title: `Service Report ${report.report_no}`, Author: 'PR TECHNO / AQUIQ' } });
     const chunks = [];
     doc.on('data', c => chunks.push(c));
     doc.on('end', () => resolve(Buffer.concat(chunks)));
@@ -179,8 +187,10 @@ function renderPdf(report, images) {
     }
 
     // signature block
-    doc.addPage();
-    doc.fillColor(INK).font('Helvetica-Bold').fontSize(12).text('Service engineer', 40, 60);
+    let sy = 60;
+    if (!images.length && !(report.videos && report.videos.length) && y < 600) sy = y + 40;   // fits under the table
+    else doc.addPage();
+    doc.fillColor(INK).font('Helvetica-Bold').fontSize(12).text('Service engineer', 40, sy);
     doc.font('Helvetica').fontSize(11)
       .text(report.engineer_designation ? `${report.engineer_name}, ${report.engineer_designation}` : report.engineer_name, 40, doc.y + 8)
       .text(`ID: ${report.engineer_code}`)
@@ -188,6 +198,15 @@ function renderPdf(report, images) {
     doc.moveDown(2).font('Helvetica-Bold').text('Customer approval', 40, doc.y);
     doc.font('Helvetica').text(report.approval_label, 40, doc.y + 6, { width: W });
     doc.fillColor(MUTED).fontSize(9).text('PR TECHNO  |  AQUIQ Water Monitoring', 40, 780, { width: W, align: 'center' });
+    // stamp on every page: report number on the left, India date and time on the right
+    const range = doc.bufferedPageRange();
+    const stamp = report.stamp_at ? stampText(new Date(report.stamp_at)) : '';
+    for (let i = range.start; i < range.start + range.count; i++) {
+      doc.switchToPage(i);
+      doc.fillColor(INK).font('Helvetica').fontSize(8.5)
+        .text(report.report_no, 40, 16, { width: W / 2, lineBreak: false })
+        .text(stamp, 40 + W / 2, 16, { width: W / 2, align: 'right', lineBreak: false });
+    }
     doc.end();
   });
 }
@@ -233,7 +252,7 @@ function createReportService(store, tickets, { now = () => new Date(), mailer, f
   function header(t, at) {
     return {
       report_no: reportNo(t), ticket_no: t.ticket_no, service_name: serviceName(t),
-      when_label: istStamp(at), location: [t.address, t.pincode].filter(Boolean).join(' – ') || null,
+      when_label: istStamp(at), stamp_at: at.toISOString(), location: [t.address, t.pincode].filter(Boolean).join(' – ') || null,
       admin_name: t.contact_person || null, site_place: t.site_name || t.address || null,
       latitude: t.latitude ?? null, longitude: t.longitude ?? null,
     };
