@@ -17,9 +17,8 @@ async function test(name, fn) {
 
 const PHOTO = (ticketId, n, ext = 'jpg') => `jobs/${ticketId}/0000000${n}-0000-4000-8000-000000000000.${ext}`;
 const FORM = {
-  overall_status: 'Completed', model: '100/150', capacity: '100/150 LPH', flow_range: '100–110 LPH',
-  tds_status: 'NO ISSUE (USER)', stand: 'NO ISSUE', load: 'No Fluctuation', tank: '200L',
-  rejection: 'MAINTAINED/GOOD', taste: 'SUITABLE FOR HUMAN CONSUMPTION', remarks: 'Changed sediment filter',
+  overall_status: 'Completed', capacity: '100/150 LPH', tds_status: 'NO ISSUE (USER)', load: 'No Fluctuation',
+  remarks: 'Changed sediment filter',
 };
 
 function world({ mailer, customer } = {}) {
@@ -133,8 +132,8 @@ async function toWorkDone(w, e, t) {
     const w = world(); const { e, t } = await engineerOnJob(w);
     await toWorkDone(w, e, t);
     await w.ts.act(t.id, { action: 'approve_on_behalf', note: 'ok' }, ADMIN);
-    await ok400(w.rs.submit(e, t.id, { ...FORM, taste: '' }), 400, /taste/i);
-    await ok400(w.rs.submit(e, t.id, { ...FORM, stand: 'BROKEN' }), 400, /not a valid choice/);
+    await ok400(w.rs.submit(e, t.id, { ...FORM, load: '' }), 400, /load/i);
+    await ok400(w.rs.submit(e, t.id, { ...FORM, overall_status: 'BROKEN' }), 400, /not a valid choice/);
     assert.strictEqual(w.reportsRows.length, 0);
     assert.strictEqual((await w.store.getTicket(t.id)).status, 'approved');   // nothing half-done
   });
@@ -198,6 +197,17 @@ async function toWorkDone(w, e, t) {
     assert.strictEqual(job.photos.filter(p => p.media_type === 'video').length, 3);
   });
 
+  await test('designation is printed with the engineer name and kept on the report', async () => {
+    const w = world(); const { e, t } = await engineerOnJob(w);
+    await w.store.updateEngineer(e.id, { designation: 'Senior Service Engineer' });
+    const e2 = await w.store.getEngineer(e.id);
+    await toWorkDone(w, e2, t);
+    await w.ts.act(t.id, { action: 'approve_on_behalf', note: 'ok' }, ADMIN);
+    await w.rs.submit(e2, t.id, FORM);
+    assert.strictEqual(w.reportsRows[0].data.engineer_designation, 'Senior Service Engineer');
+    assert.ok(!('model' in w.reportsRows[0].data) && !('stand' in w.reportsRows[0].data));
+  });
+
   await test('service name comes from the issue; falls back to the standard sample line', async () => {
     assert.strictEqual(R.serviceName({ ticket_no: 'PMR1', issue_category: 'Low or no water flow' }), 'Low or no water flow – RESOLVED');
     assert.strictEqual(R.serviceName({ ticket_no: 'PMR2611790001013', issue_category: 'Other', description: '' }), 'ISSUE - PMR2611790001013 RESOLVED - AQUIQ');
@@ -206,9 +216,9 @@ async function toWorkDone(w, e, t) {
   await test('PDF mentions "without customer approval" when the engineer overrode', async () => {
     const pdf = await R.renderPdf({
       report_no: 'FSR-X', ticket_no: 'X', service_name: 'S', when_label: 'now', location: 'L', admin_name: 'A', site_place: 'P',
-      data: { ...FORM, hardness: 'N/A', ph: 'N/A' }, device_readings: { output_tds: '1 ppm', stale: true, captured_at: '2026-10-13T06:00:00Z' },
+      data: { ...FORM }, device_readings: { output_tds: '1 ppm', stale: true, captured_at: '2026-10-13T06:00:00Z' },
       approval_mode: 'engineer_override', override_reason: 'Customer is taking time', approval_label: 'Filed WITHOUT customer approval.',
-      engineer_name: 'Ravi', engineer_code: 'ENG-1001', videos: [{ kind: 'after', when: 'now' }],
+      engineer_name: 'Ravi', engineer_code: 'ENG-1001', engineer_designation: 'Senior Service Engineer', videos: [{ kind: 'after', when: 'now' }],
     }, []);
     assert.strictEqual(pdf.slice(0, 4).toString(), '%PDF');
     assert.ok(pdf.length > 1500);

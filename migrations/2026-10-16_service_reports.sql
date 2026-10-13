@@ -42,3 +42,6 @@ update storage.buckets
    set file_size_limit = 52428800,
        allowed_mime_types = array['image/jpeg', 'image/png', 'image/webp', 'video/mp4', 'video/quicktime']
  where id = 'job-photos';
+
+-- 5) Designation printed under the engineer's name on every service report.
+alter table engineers add column if not exists designation text;

@@ -20,21 +20,11 @@ const NA = 'Not available';
 // The same choices as the PR TECHNO FSR form.
 const OPTIONS = {
   overall_status: ['Working', 'Under Maintenance', 'Completed', 'Pending', 'Critical'],
-  model: ['100/150', '200/250', '300/350', '400/500', '1000', '2000', '5000', '10000'],
   capacity: ['100/150 LPH', '200/250 LPH', '400/500 LPH', '1000 LPH', '2000 LPH', '5000 LPH', '10000 LPH'],
-  flow_range: ['120–130 LPH', '100–110 LPH', '130–150 LPH', '150–180 LPH', '180–200 LPH', '200–220 LPH',
-    '230–250 LPH', '250–280 LPH', '280–300 LPH', '600–700 LPH', '1000–1500 LPH', '2000–2400 LPH',
-    '5000–5500 LPH', '10000–10500 LPH'],
   tds_status: ['NO ISSUE (USER)', 'ISSUE FOUND', 'NEEDS MONITORING'],
-  stand: ['NO ISSUE', 'ISSUE FOUND', 'REPLACED', 'N/A'],
-  hardness: ['N/A', 'Low', 'Medium', 'High'],
-  ph: ['N/A', 'Acidic', 'Neutral', 'Alkaline'],
   load: ['No Fluctuation', 'Fluctuation'],
-  tank: ['50L', '100L', '200LL', '200L', '500L', '1000L', '2000L', 'Others'],
-  rejection: ['MAINTAINED/GOOD', 'BELOW THRESHOLD', 'NEEDS ATTENTION', 'CRITICAL'],
-  taste: ['NOT FOR HUMAN CONSUMPTION', 'SUITABLE FOR HUMAN CONSUMPTION', 'UNDER TEST'],
 };
-const REQUIRED = ['overall_status', 'model', 'capacity', 'flow_range', 'tds_status', 'stand', 'load', 'tank', 'rejection', 'taste'];
+const REQUIRED = ['overall_status', 'capacity', 'tds_status', 'load'];
 
 // Why the engineer is filing without the customer's approval.
 const OVERRIDE_REASONS = [
@@ -144,17 +134,13 @@ function renderPdf(report, images) {
     const d = report.data;
     const dr = report.device_readings || {};
     const rows = [
-      ['Model', `SER_PR ${d.model}`], ['Color', 'Standard'], ['Make', 'SER_PRTEC'],
-      ['Capacity', d.capacity], ['Flow (rated range)', d.flow_range], ['R.O Tank', d.ro_tank],
+      ['Color', 'Standard'], ['Make', 'SER_PRTEC'], ['Capacity', d.capacity],
       ['T.D.S Input (device)', dr.feed_tds], ['T.D.S Output (device)', `${dr.output_tds}   –   ${d.tds_status}`],
       ['Output flow (device)', dr.output_flow], ['Reject flow (device)', dr.reject_flow],
       ['Membrane (device)', dr.membrane], ['Pump (device)', dr.pump_condition],
-      ['Stand', d.stand],
-      ['Hardness', `${d.hardness}${d.hardness_value ? `   Value: ${d.hardness_value}` : ''}`],
-      ['pH', `${d.ph}${d.ph_value ? `   Value: ${d.ph_value}` : ''}`],
-      ['Load', d.load], ['Tank', d.tank], ['Rejection %', d.rejection], ['Taste', d.taste],
-      ['Remarks / Notes', d.remarks],
+      ['Load', d.load],
     ];
+    if (d.remarks) rows.push(['Remarks / Notes', d.remarks]);   // only when the engineer wrote something
     rows.forEach(([k, v], i) => {
       if (y > 740) { doc.addPage(); y = 40; }
       const h = Math.max(22, doc.heightOfString(String(v || '—'), { width: W - 190, fontSize: 10.5 }) + 10);
@@ -165,7 +151,7 @@ function renderPdf(report, images) {
     });
     if (dr.captured_at) {
       doc.fillColor(MUTED).font('Helvetica').fontSize(8.5).text(
-        `Device readings captured ${istStamp(new Date(dr.captured_at))}${dr.stale ? ' – the unit was offline at that time, so values may be old or unavailable' : ''}. Indicative (about ±10%), not a lab test.`,
+        `Device readings captured ${istStamp(new Date(dr.captured_at))}${dr.stale ? ' – the unit was offline at that time, so values may be old or unavailable' : ''}. AQUIQ test.`,
         40, y + 6, { width: W });
       y = doc.y + 10;
     }
@@ -196,7 +182,7 @@ function renderPdf(report, images) {
     doc.addPage();
     doc.fillColor(INK).font('Helvetica-Bold').fontSize(12).text('Service engineer', 40, 60);
     doc.font('Helvetica').fontSize(11)
-      .text(`Name: ${report.engineer_name}`, 40, doc.y + 8)
+      .text(report.engineer_designation ? `${report.engineer_name}, ${report.engineer_designation}` : report.engineer_name, 40, doc.y + 8)
       .text(`ID: ${report.engineer_code}`)
       .text(`Report filed: ${report.when_label} (India time)`);
     doc.moveDown(2).font('Helvetica-Bold').text('Customer approval', 40, doc.y);
@@ -280,11 +266,6 @@ function createReportService(store, tickets, { now = () => new Date(), mailer, f
     }
     const missing = REQUIRED.filter(k => !d[k]);
     if (missing.length) throw httpError(400, `Please fill in: ${missing.map(m => m.replace(/_/g, ' ')).join(', ')}.`);
-    d.hardness = d.hardness || 'N/A';
-    d.ph = d.ph || 'N/A';
-    d.hardness_value = clean(input.hardness_value, 30) || null;
-    d.ph_value = clean(input.ph_value, 30) || null;
-    d.ro_tank = clean(input.ro_tank, 60) || null;
     d.remarks = clean(input.remarks, 1500) || null;
     return d;
   }
@@ -339,7 +320,8 @@ function createReportService(store, tickets, { now = () => new Date(), mailer, f
     const media = await loadImages(t.id);
     const full = {
       ...head, data, device_readings: readings, approval_mode: approvalMode, override_reason: overrideReason,
-      approval_label: approvalLabel, engineer_name: eng.name, engineer_code: eng.engineer_code, videos: media.videos,
+      approval_label: approvalLabel, engineer_name: eng.name, engineer_code: eng.engineer_code,
+      engineer_designation: eng.designation || null, videos: media.videos,
     };
     const pdf = await renderPdf(full, media.images);
     const pdfPath = `${t.id}/${head.report_no}.pdf`;
@@ -350,7 +332,8 @@ function createReportService(store, tickets, { now = () => new Date(), mailer, f
     try {
       row = await store.insertReport({
         ticket_id: t.id, report_no: head.report_no, engineer_id: eng.id, service_name: head.service_name,
-        data, device_readings: readings, approval_mode: approvalMode, override_reason: overrideReason, pdf_path: pdfPath,
+        data: { ...data, engineer_name: eng.name, engineer_code: eng.engineer_code, engineer_designation: eng.designation || null },
+        device_readings: readings, approval_mode: approvalMode, override_reason: overrideReason, pdf_path: pdfPath,
         created_at: at.toISOString(),
       });
     } catch (err) {

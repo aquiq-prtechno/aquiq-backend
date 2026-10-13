@@ -184,6 +184,7 @@ function createEngineerService(store, { now = () => new Date(), auth = null } = 
       out.radius_km = r;
     }
     if (input.state_wide !== undefined) out.state_wide = !!input.state_wide;
+    if (input.designation !== undefined) out.designation = cleanText(input.designation, 60) || null;
     return out;
   };
 
@@ -223,6 +224,7 @@ function createEngineerService(store, { now = () => new Date(), auth = null } = 
       address: v.address ?? null, city: v.city ?? null, state: v.state ?? null,
       pincode: v.pincode, latitude: v.latitude ?? null, longitude: v.longitude ?? null,
       radius_km: v.radius_km ?? DEFAULT_RADIUS_KM, state_wide: v.state_wide ?? false,
+      designation: v.designation ?? null,
       id_proof_type: v.id_proof_type, id_proof_other: v.id_proof_other, id_proof_ref: v.id_proof_ref,
       proof_path: v.proof_path ?? null, proof_file_name: v.proof_file_name ?? null, proof_mime: v.proof_mime ?? null,
       proof_uploaded_at: v.proof_path ? at : null,
