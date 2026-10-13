@@ -36,6 +36,7 @@ const MAX_PHOTOS_PER_JOB = 20;   // photos; videos are counted separately
 const PHOTO_VIEW_SECONDS = 600;
 const ENGINEER_ACTIONS = ['arrive', 'work_done', 'drop', 'note'];
 const WORKING = ['accepted', 'arrived', 'work_done', 'reopened'];
+const CONTACT_VISIBLE = ['accepted', 'arrived', 'reopened'];   // engineer sees contact details only while doing the job
 
 const CATEGORIES = [
   'Water tastes salty / high TDS',
@@ -454,7 +455,10 @@ function createTicketService(store, { now = () => new Date() } = {}) {
     return {
       id: t.id, ticket_no: t.ticket_no, status: t.status, status_label: d.status_label,
       urgency: t.urgency, issue_category: t.issue_category, description: t.description,
-      site_name: t.site_name, contact_person: t.contact_person, contact_phone: t.contact_phone,
+      site_name: t.site_name,
+      // Privacy: the customer's contact person and number are shown only while the job is being done.
+      contact_person: CONTACT_VISIBLE.includes(t.status) ? t.contact_person : null,
+      contact_phone: CONTACT_VISIBLE.includes(t.status) ? t.contact_phone : null,
       address: t.address, pincode: t.pincode, latitude: t.latitude, longitude: t.longitude,
       device_snapshot: t.device_snapshot, eta_at: t.eta_at, created_at: t.created_at,
       accepted_at: t.accepted_at, arrived_at: t.arrived_at, work_done_at: t.work_done_at,

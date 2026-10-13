@@ -268,8 +268,11 @@ function createReportService(store, tickets, { now = () => new Date(), mailer, f
       : t.status === 'approved' ? 'ready'
       : t.status === 'work_done' ? 'needs_reason'
       : 'locked';
+    const head = header(t, at);
+    delete head.admin_name;          // privacy: the app never shows the customer's contact person after the job
+    delete head.latitude; delete head.longitude;
     return {
-      state, ...header(t, at),
+      state, ...head,
       device: deviceReadings(customer, at),
       options: OPTIONS, required: REQUIRED, reasons: OVERRIDE_REASONS,
       filed: existing ? { report_no: existing.report_no, created_at: existing.created_at } : null,

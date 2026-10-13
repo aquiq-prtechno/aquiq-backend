@@ -73,8 +73,25 @@ async function toWorkDone(w, e, t) {
     const f = await w.rs.form(e, t.id);
     assert.strictEqual(f.state, 'ready');
     assert.strictEqual(f.report_no, `FSR-${t.ticket_no}`);
-    assert.strictEqual(f.admin_name, 'Hotel Saffron');
+    assert.strictEqual(f.admin_name, undefined);               // contact person is not shown to the engineer any more
     assert.match(f.location, /Sector 14/);
+  });
+
+  await test('privacy: contact person and number are visible only while doing the job', async () => {
+    const w = world(); const { e, t } = await engineerOnJob(w);
+    let job = await w.ts.engineerJob(e, t.id);
+    assert.strictEqual(job.contact_phone, '9999900000');
+    assert.strictEqual(job.contact_person, 'Hotel Saffron');
+    await toWorkDone(w, e, t);
+    job = await w.ts.engineerJob(e, t.id);
+    assert.strictEqual(job.contact_phone, null);
+    assert.strictEqual(job.contact_person, null);
+    const listed = (await w.ts.engineerJobs(e)).mine[0];
+    assert.strictEqual(listed.contact_phone, null);
+    await w.ts.act(t.id, { action: 'approve_on_behalf', note: 'ok' }, ADMIN);
+    await w.rs.submit(e, t.id, FORM);
+    assert.ok(!JSON.stringify(await w.rs.form(e, t.id)).includes('9999900000'));
+    assert.strictEqual(w.reportsRows[0].data.admin_name, undefined);
   });
 
   await test('the six unit readings come from the device, never from what the engineer sends', async () => {
