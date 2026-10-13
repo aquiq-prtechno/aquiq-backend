@@ -383,7 +383,9 @@ function createReportService(store, tickets, { now = () => new Date(), mailer, f
     });
 
     const emailed = await sendEmail(row, t, pdf, full);
-    return { report_no: head.report_no, approval_mode: approvalMode, email_status: emailed.email_status };
+    let pdfUrl = null;
+    try { pdfUrl = await store.signedReadUrl(REPORT_BUCKET, pdfPath, 900); } catch { /* the report is saved; the link can be fetched from the admin panel */ }
+    return { report_no: head.report_no, approval_mode: approvalMode, email_status: emailed.email_status, pdf_url: pdfUrl };
   }
 
   async function sendEmail(row, t, pdf, full) {

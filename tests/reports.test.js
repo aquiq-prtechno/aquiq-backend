@@ -116,6 +116,7 @@ async function toWorkDone(w, e, t) {
     const out = await w.rs.submit(e, t.id, FORM);
     assert.strictEqual(out.report_no, `FSR-${t.ticket_no}`);
     assert.strictEqual(out.approval_mode, 'admin');
+    assert.match(out.pdf_url, /service-reports\/.+\.pdf/);
     assert.strictEqual((await w.store.getTicket(t.id)).status, 'closed');
     const pdf = Object.values(w.objects)[0];
     assert.strictEqual(pdf.slice(0, 4).toString(), '%PDF');
