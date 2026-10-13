@@ -1188,6 +1188,14 @@ app.post('/admin/team/:id/disable', adminAuth.requireOwner, async (req, res) => 
   }
 });
 
+// ─── Service Tickets (admin job board) ───────────────────────────────────────
+// Lives under /admin/tickets, so the admin login guard registered above covers it.
+// The tickets tables are locked to the public key — only this server reads them.
+const ticketsModule = require('./tickets');
+const ticketService = ticketsModule.createTicketService(ticketsModule.supabaseStore(supabase));
+app.use('/admin/tickets', ticketsModule.createTicketsRouter(ticketService));
+ticketsModule.startTicketWatcher(ticketService, cron);
+
 // ─── Start Server ─────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
