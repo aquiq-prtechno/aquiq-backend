@@ -36,6 +36,7 @@ const MAX_PHOTOS_PER_JOB = 20;   // photos; videos are counted separately
 const PHOTO_VIEW_SECONDS = 600;
 const ENGINEER_ACTIONS = ['arrive', 'work_done', 'drop', 'note'];
 const WORKING = ['accepted', 'arrived', 'work_done', 'reopened'];
+const MEDIA_OPEN = ['accepted', 'arrived', 'work_done', 'reopened', 'approved'];   // photos can be added until the report is filed
 const CONTACT_VISIBLE = ['accepted', 'arrived', 'reopened'];   // engineer sees contact details only while doing the job
 
 const CATEGORIES = [
@@ -527,12 +528,6 @@ function createTicketService(store, { now = () => new Date() } = {}) {
     if (!ENGINEER_ACTIONS.includes(action)) throw httpError(400, 'That action is not available to engineers.');
     if (t.engineer_id !== eng.id) throw httpError(403, 'This job is not assigned to you.');
 
-    if (action === 'work_done') {
-      const kinds = (await store.listPhotos(id)).map(p => p.kind);
-      if (!kinds.includes('before') || !kinds.includes('after')) {
-        throw httpError(400, 'Add at least one BEFORE photo and one AFTER photo before marking the work done.');
-      }
-    }
     await act(id, { action, note: input.note }, actor);
     return engineerJob(eng, id);
   }
@@ -541,7 +536,7 @@ function createTicketService(store, { now = () => new Date() } = {}) {
     if (!UUID_RE.test(String(id))) throw httpError(400, 'Invalid job.');
     const t = await store.getTicket(id);
     if (!t || t.engineer_id !== eng.id) throw httpError(404, 'This job is not assigned to you.');
-    if (!WORKING.includes(t.status)) throw httpError(409, 'Photos can only be added while the job is in progress.');
+    if (!MEDIA_OPEN.includes(t.status)) throw httpError(409, 'Photos can only be added while the job is open.');
     const mime = String(input.content_type || '');
     if (!PHOTO_MIMES[mime]) throw httpError(400, 'Attach a JPG, PNG or WebP photo, or an MP4 / MOV video.');
     if (!PHOTO_KINDS.includes(input.kind)) throw httpError(400, 'Say whether this is a before, after or other photo.');
@@ -561,7 +556,7 @@ function createTicketService(store, { now = () => new Date() } = {}) {
     if (!UUID_RE.test(String(id))) throw httpError(400, 'Invalid job.');
     const t = await store.getTicket(id);
     if (!t || t.engineer_id !== eng.id) throw httpError(404, 'This job is not assigned to you.');
-    if (!WORKING.includes(t.status)) throw httpError(409, 'Photos can only be added while the job is in progress.');
+    if (!MEDIA_OPEN.includes(t.status)) throw httpError(409, 'Photos can only be added while the job is open.');
     const path = String(input.path || '');
     const m = PHOTO_PATH_RE.exec(path);
     if (!m || m[1] !== id) throw httpError(400, 'That photo does not belong to this job. Upload it again.');

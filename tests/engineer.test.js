@@ -134,18 +134,16 @@ const asEng = async (store, id) => store.getEngineer(id);
     await w.ts.engineerAct(eng, t.id, { action: 'accept' });
     return { ...w, eng, t, e };
   }
-  await test('photos: "work done" is refused until a BEFORE and an AFTER photo exist', async () => {
+  await test('photos: work done needs no photos (they go in the report); photos and videos attach to the job', async () => {
     const { ts, store, eng, t } = await accepted();
     await ts.engineerAct(eng, t.id, { action: 'arrive' });
-    await ok400(ts.engineerAct(eng, t.id, { action: 'work_done' }), 400, /BEFORE photo and one AFTER/);
     store.files.add(PHOTO(t.id, 1));
-    await ts.engineerAddPhoto(eng, t.id, { path: PHOTO(t.id, 1), kind: 'before' });
-    await ok400(ts.engineerAct(eng, t.id, { action: 'work_done' }), 400, /AFTER/);
-    store.files.add(PHOTO(t.id, 2));
-    await ts.engineerAddPhoto(eng, t.id, { path: PHOTO(t.id, 2), kind: 'after', caption: 'new membrane fitted' });
+    await ts.engineerAddPhoto(eng, t.id, { path: PHOTO(t.id, 1), kind: 'other' });
     const job = await ts.engineerAct(eng, t.id, { action: 'work_done' });
     assert.strictEqual(job.status, 'work_done');
-    assert.strictEqual(job.photos.length, 2);
+    assert.strictEqual(job.photos.length, 1);
+    store.files.add(PHOTO(t.id, 2));
+    await ts.engineerAddPhoto(eng, t.id, { path: PHOTO(t.id, 2), kind: 'other' });     // still allowed while the report is open
   });
   await test('photos: extra photos are allowed; only image types; only for your own working job', async () => {
     const { ts, store, eng, t, es } = await accepted();
@@ -232,7 +230,7 @@ const asEng = async (store, id) => store.getEngineer(id);
       assert.strictEqual(jobs.s, 200); assert.strictEqual(jobs.b.offers.length, 1);
       const acc = await call(`/jobs/${t.id}/action`, { token: tok, body: { action: 'accept', eta_minutes: 40 } });
       assert.strictEqual(acc.s, 200); assert.strictEqual(acc.b.job.status, 'accepted');
-      assert.strictEqual((await call(`/jobs/${t.id}/action`, { token: tok, body: { action: 'work_done' } })).s, 400);   // no photos yet
+      assert.strictEqual((await call(`/jobs/${t.id}/action`, { token: tok, body: { action: 'work_done' } })).s, 409);   // not arrived yet
       assert.strictEqual((await call('/device', { token: tok, body: { token: 'ExponentPushToken[abcdefghij]', platform: 'android' } })).s, 200);
       assert.strictEqual(store.devices.length, 1);
 

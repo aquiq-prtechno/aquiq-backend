@@ -167,7 +167,7 @@ function renderPdf(report, images) {
     // photos
     if (images.length) {
       doc.addPage();
-      doc.fillColor(INK).font('Helvetica-Bold').fontSize(14).text('Site photos', 40, 40);
+      doc.fillColor(INK).font('Helvetica-Bold').fontSize(14).text('Site Photos / Reference Images', 40, 40);
       let px = 40; let py = 66; const cell = (W - 20) / 3;
       for (const im of images) {
         if (py + cell + 16 > 790) { doc.addPage(); py = 40; px = 40; }
@@ -301,13 +301,13 @@ function createReportService(store, tickets, { now = () => new Date(), mailer, f
       for (const p of photos.slice(0, 18)) {
         try {
           const url = await store.signedReadUrl(PHOTO_BUCKET, p.path, 300);
-          images.push({ kind: p.kind === 'other' ? 'during / other' : p.kind, buffer: await fetchBytes(url) });
+          images.push({ kind: p.kind === 'other' ? '' : p.kind, buffer: await fetchBytes(url) });
         } catch { /* a photo that can't be fetched is left out of the PDF; it stays on the job */ }
       }
     }
     return {
       images, photoCount: photos.length,
-      videos: videos.map(v => ({ kind: v.kind === 'other' ? 'during / other' : v.kind, when: istStamp(new Date(v.created_at)) })),
+      videos: videos.map(v => ({ kind: v.kind === 'other' ? 'site' : v.kind, when: istStamp(new Date(v.created_at)) })),
     };
   }
 
@@ -331,6 +331,9 @@ function createReportService(store, tickets, { now = () => new Date(), mailer, f
     }
 
     const data = validate(input);
+    if (!(await store.listPhotos(t.id)).some(m => mediaOf(m) === 'photo')) {
+      throw httpError(400, 'Add at least one site photo before saving the report.');
+    }
     const at = now();
     const customer = await store.getCustomer(t.customer_id);
     const readings = deviceReadings(customer, at);

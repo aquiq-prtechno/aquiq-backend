@@ -145,6 +145,18 @@ async function toWorkDone(w, e, t) {
     assert.strictEqual(w.reportsRows[0].override_reason, 'Customer was abroad');
   });
 
+  await test('the report cannot be saved without at least one site photo', async () => {
+    const w = world(); const { e, t } = await engineerOnJob(w);
+    await w.ts.engineerAct(e, t.id, { action: 'arrive' });
+    await w.ts.engineerAct(e, t.id, { action: 'work_done' });      // no photos needed to finish the work
+    await w.ts.act(t.id, { action: 'approve_on_behalf', note: 'ok' }, ADMIN);
+    await ok400(w.rs.submit(e, t.id, FORM), 400, /site photo/);
+    const path = PHOTO(t.id, 1); w.store.files.add(path);
+    await w.ts.engineerAddPhoto(e, t.id, { path, kind: 'other', mime: 'image/jpeg' });   // allowed after approval too
+    await w.rs.submit(e, t.id, FORM);
+    assert.strictEqual((await w.store.getTicket(t.id)).status, 'closed');
+  });
+
   await test('missing or invalid choices are refused with a clear message', async () => {
     const w = world(); const { e, t } = await engineerOnJob(w);
     await toWorkDone(w, e, t);
