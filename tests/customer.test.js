@@ -13,6 +13,7 @@ async function test(name, fn) {
 function world() {
   const c = clock('2026-10-14T06:00:00Z');
   const store = memStore(customers);
+  store.getReportByTicket = async () => null;
   const ts = T.createTicketService(store, { now: c.now });
   const es = E.createEngineerService(store, { now: c.now, auth: fakeAccounts() });
   const cs = C.createCustomerService(store, ts, { now: c.now });
@@ -77,6 +78,54 @@ const ASK = { store_id: CUST, phone: '99999 00000', issue_category: 'Low or no w
     assert.strictEqual(l.tickets[0].engineer_name, 'Ravi');
     assert.ok(!JSON.stringify(l).includes('9876543210'));
     assert.ok(l.categories.includes('Pump not running / noisy'));
+  });
+
+  async function toWorkDone(w) {
+    const eng = await w.es.register({ name: 'Ravi', phone: '9876543210', pincode: '122001', id_proof_type: 'pan', id_proof_ref: 'ABCDE1234F' }, ADMIN);
+    const o = await w.cs.request(ASK);
+    await w.ts.act(o.ticket.id, { action: 'accept', engineer_id: eng.id, eta_minutes: 30 }, ADMIN);
+    const e = await w.store.getEngineer(eng.id);
+    await w.ts.engineerAct(e, o.ticket.id, { action: 'arrive' });
+    await w.ts.engineerAct(e, o.ticket.id, { action: 'work_done' });
+    return { id: o.ticket.id, e };
+  }
+
+  await test('the customer can approve finished work; then the engineer can file the report', async () => {
+    const w = world(); const { id } = await toWorkDone(w);
+    const l = await w.cs.list(ASK);
+    assert.strictEqual(l.tickets[0].can_respond, true);
+    const out = await w.cs.approve({ ...ASK, ticket_id: id });
+    assert.strictEqual(out.ticket.status, 'approved');
+    assert.strictEqual((await w.store.getTicket(id)).customer_response, 'approved');
+    await ok400(w.cs.approve({ ...ASK, ticket_id: id }), 409, /not waiting/);
+  });
+
+  await test('"not satisfied" needs a reason and reopens the job', async () => {
+    const w = world(); const { id } = await toWorkDone(w);
+    await ok400(w.cs.notSatisfied({ ...ASK, ticket_id: id, reason: ' ' }), 400, /still wrong/);
+    const out = await w.cs.notSatisfied({ ...ASK, ticket_id: id, reason: 'Still leaking at the joint' });
+    assert.strictEqual(out.ticket.status, 'reopened');
+    assert.strictEqual((await w.store.getTicket(id)).customer_reason, 'Still leaking at the joint');
+  });
+
+  await test('a customer cannot approve someone else’s request or one that is not finished', async () => {
+    const w = world(); const { id } = await toWorkDone(w);
+    const other = '33333333-3333-4333-8333-333333333333';
+    w.store.tickets.find(t => t.id === id).customer_id = other;
+    await ok400(w.cs.approve({ ...ASK, ticket_id: id }), 404, /could not find/);
+    await ok400(w.cs.approve({ ...ASK, ticket_id: 'bad' }), 404);
+    const w2 = world(); const o = await w2.cs.request(ASK);
+    await ok400(w2.cs.approve({ ...ASK, ticket_id: o.ticket.id }), 409, /not waiting/);
+    await ok400(w2.cs.approve({ ...ASK, phone: '9000000000', ticket_id: o.ticket.id }), 401);
+  });
+
+  await test('the customer gets a link to the finished service report only when it exists', async () => {
+    const w = world(); const { id } = await toWorkDone(w);
+    await ok400(w.cs.report({ ...ASK, ticket_id: id }), 404, /not ready/);
+    w.store.getReportByTicket = async () => ({ report_no: 'FSR-X', pdf_path: `${id}/FSR-X.pdf` });
+    const r = await w.cs.report({ ...ASK, ticket_id: id });
+    assert.match(r.pdf_url, /service-reports/);
+    assert.strictEqual(r.report_no, 'FSR-X');
   });
 
   for (const [s, n] of results) console.log(`${s}  ${n}`);

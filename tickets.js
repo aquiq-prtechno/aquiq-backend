@@ -279,7 +279,7 @@ function createTicketService(store, { now = () => new Date(), push = null } = {}
 
     const action = String(input.action || '');
     const def = ACTIONS[action];
-    if (!def || def.customerOnly || (def.engineerOnly && actor.role !== 'engineer')) throw httpError(400, 'Unknown action.');
+    if (!def || (def.customerOnly && actor.role !== 'customer') || (def.engineerOnly && actor.role !== 'engineer')) throw httpError(400, 'Unknown action.');
 
     const note = cleanText(input.note, 1000);
     const at = now();

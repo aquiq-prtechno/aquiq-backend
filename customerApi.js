@@ -13,6 +13,7 @@
 
 const express = require('express');
 const { CATEGORIES, STATUS_LABELS, TERMINAL } = require('./tickets');
+const REPORT_BUCKET = 'service-reports';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_PER_DAY = 5;
@@ -41,6 +42,7 @@ function createCustomerService(store, tickets, { now = () => new Date() } = {}) 
       engineer_name: ['accepted', 'arrived', 'work_done', 'approved', 'reopened'].includes(t.status) ? t.engineer_name : null,
       eta_at: t.status === 'accepted' ? t.eta_at : null,
       active: !TERMINAL.includes(t.status),
+      can_respond: t.status === 'work_done',          // the customer may approve or say not satisfied
     };
   }
 
@@ -72,10 +74,54 @@ function createCustomerService(store, tickets, { now = () => new Date() } = {}) 
 
   async function list(input) {
     const c = await who(input);
-    return { tickets: (await store.listByCustomer(c.id, 10)).map(view), categories: CATEGORIES };
+    const rows = await store.listByCustomer(c.id, 10);
+    const out = [];
+    for (const t of rows) {
+      const v = view(t);
+      if (t.status === 'closed' && store.getReportByTicket) {
+        const r = await store.getReportByTicket(t.id).catch(() => null);
+        v.report_available = !!(r && r.pdf_path);
+        v.report_no = r ? r.report_no : null;
+      }
+      out.push(v);
+    }
+    return { tickets: out, categories: CATEGORIES };
   }
 
-  return { request, list };
+  // the customer's own ticket, or an error that reveals nothing about other tickets
+  async function ownTicket(c, ticketId) {
+    const t = UUID_RE.test(String(ticketId)) ? await store.getTicket(ticketId) : null;
+    if (!t || t.customer_id !== c.id) throw httpError(404, 'We could not find that request.');
+    return t;
+  }
+
+  async function approve(input) {
+    const c = await who(input);
+    const t = await ownTicket(c, input.ticket_id);
+    if (t.status !== 'work_done') throw httpError(409, 'This request is not waiting for your approval.');
+    const out = await tickets.act(t.id, { action: 'approve' }, { email: `customer: ${c.name || c.id}`, role: 'customer' });
+    return { ticket: view(out) };
+  }
+
+  async function notSatisfied(input) {
+    const c = await who(input);
+    const t = await ownTicket(c, input.ticket_id);
+    if (t.status !== 'work_done') throw httpError(409, 'This request is not waiting for your approval.');
+    const reason = clean(input.reason, 500);
+    if (reason.length < 3) throw httpError(400, 'Please tell us what is still wrong.');
+    const out = await tickets.act(t.id, { action: 'not_satisfied', note: reason }, { email: `customer: ${c.name || c.id}`, role: 'customer' });
+    return { ticket: view(out) };
+  }
+
+  async function report(input) {
+    const c = await who(input);
+    const t = await ownTicket(c, input.ticket_id);
+    const r = await store.getReportByTicket(t.id);
+    if (!r || !r.pdf_path) throw httpError(404, 'The service report is not ready yet.');
+    return { report_no: r.report_no, pdf_url: await store.signedReadUrl(REPORT_BUCKET, r.pdf_path, 600) };
+  }
+
+  return { request, list, approve, notSatisfied, report };
 }
 
 function createCustomerRouter(service) {
@@ -89,6 +135,9 @@ function createCustomerRouter(service) {
   };
   router.post('/service-request', wrap((req) => service.request(req.body || {})));
   router.post('/service-requests', wrap((req) => service.list(req.body || {})));
+  router.post('/service-request/approve', wrap((req) => service.approve(req.body || {})));
+  router.post('/service-request/not-satisfied', wrap((req) => service.notSatisfied(req.body || {})));
+  router.post('/service-request/report', wrap((req) => service.report(req.body || {})));
   return router;
 }
 
