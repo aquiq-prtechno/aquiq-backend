@@ -418,6 +418,11 @@ function supabaseEngineerStore(sb) {
     async upsertDevice(row) {
       await one(sb.from('engineer_devices').upsert([{ ...row, updated_at: new Date().toISOString() }], { onConflict: 'token' }));
     },
+    async listDevices(engineerIds) {
+      if (!engineerIds.length) return [];
+      return one(sb.from('engineer_devices').select('token,engineer_id').in('engineer_id', engineerIds));
+    },
+    async deleteDevices(tokens) { await one(sb.from('engineer_devices').delete().in('token', tokens)); },
     listEngineerEvents: (id) => one(sb.from('engineer_events').select('*').eq('engineer_id', id).order('at', { ascending: true })),
   };
 }

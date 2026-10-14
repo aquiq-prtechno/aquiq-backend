@@ -1203,7 +1203,8 @@ const serviceStore = {
 };
 // Engineer logins need the service key (creating users is a privileged Supabase action).
 const engineerAccounts = process.env.SUPABASE_SERVICE_KEY ? engineersModule.supabaseEngineerAuth(supabase) : null;
-const ticketService = ticketsModule.createTicketService(serviceStore);
+const pushService = require('./push').createPushService(serviceStore, { enabled: process.env.PUSH_ENABLED !== 'false' });
+const ticketService = ticketsModule.createTicketService(serviceStore, { push: pushService });
 const engineerService = engineersModule.createEngineerService(serviceStore, { auth: engineerAccounts });
 app.use('/admin/tickets', ticketsModule.createTicketsRouter(ticketService));
 app.use('/admin/engineers', engineersModule.createEngineersRouter(engineerService));

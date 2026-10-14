@@ -105,6 +105,13 @@ function createEngineerApiRouter({ tickets, store, auth, accounts, reports }) {
     return { ok: true };
   }));
 
+  // sign-out: this phone stops receiving this engineer's notifications
+  router.delete('/device', guard(true), wrap(async (req) => {
+    const token = String((req.body || {}).token || '').slice(0, 300);
+    if (token.length >= 10) await store.deleteDevices([token]);
+    return { ok: true };
+  }));
+
   return router;
 }
 

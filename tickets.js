@@ -210,7 +210,7 @@ function siteOf(t) {
   return { pincode: t.pincode, latitude: t.latitude, longitude: t.longitude };
 }
 
-function createTicketService(store, { now = () => new Date() } = {}) {
+function createTicketService(store, { now = () => new Date(), push = null } = {}) {
   // How many registered, active engineers cover each ticket's site (live, never stale).
   async function contextFor() {
     const engineers = await store.listActiveEngineers();
@@ -265,6 +265,10 @@ function createTicketService(store, { now = () => new Date() } = {}) {
       meta: { ticket_no: ticketNo, source: opts.source === 'customer_app' ? 'customer_app' : 'admin' },
     });
     const ctx = await contextFor();
+    if (push) {
+      const ids = rankEngineers(siteOf(row), ctx.engineers).recommended.map(e => e.id);
+      push.newComplaint(row, ids);                     // fire and forget; never blocks the ticket
+    }
     return decorate(row, at, ctx.of(row));
   }
 
@@ -349,6 +353,10 @@ function createTicketService(store, { now = () => new Date() } = {}) {
       action, from_status: ticket.status, to_status: to, note: note || null,
       meta: Object.keys(meta).length ? meta : null,
     });
+    if (push && actor.role !== 'engineer') {
+      if (action === 'accept' || action === 'reassign') push.assigned(updated, updated.engineer_id);
+    }
+    if (push && action === 'not_satisfied' && updated.engineer_id) push.reopened(updated, updated.engineer_id);
     return decorate(updated, at, ctx.of(updated));
   }
 

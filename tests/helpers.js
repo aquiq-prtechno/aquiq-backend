@@ -56,6 +56,8 @@ function memStore(customers) {
     async listPhotos(ticketId) { return copy(photos.filter(p => p.ticket_id === ticketId)); },
     async insertDecline(row) { if (!declines.some(d => d.ticket_id === row.ticket_id && d.engineer_id === row.engineer_id)) declines.push(copy(row)); },
     async listDeclinedTicketIds(engId) { return declines.filter(d => d.engineer_id === engId).map(d => d.ticket_id); },
+    async listDevices(ids) { return copy(devices.filter(d => ids.includes(d.engineer_id))); },
+    async deleteDevices(tokens) { for (const t of tokens) { const i = devices.findIndex(d => d.token === t); if (i >= 0) devices.splice(i, 1); } },
     async upsertDevice(row) { const i = devices.findIndex(d => d.token === row.token); if (i >= 0) devices[i] = copy(row); else devices.push(copy(row)); },
     async insertEngineer(row) {
       const e = { id: `00000000-0000-4000-9000-${String(engineers.length + 1).padStart(12, '0')}`, ...copy(row) };
