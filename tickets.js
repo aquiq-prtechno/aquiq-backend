@@ -220,7 +220,7 @@ function createTicketService(store, { now = () => new Date() } = {}) {
     };
   }
 
-  async function create(input, actor) {
+  async function create(input, actor, opts = {}) {
     const customerId = String(input.customer_id || '');
     if (!UUID_RE.test(customerId)) throw httpError(400, 'Choose a store for this complaint.');
 
@@ -247,7 +247,7 @@ function createTicketService(store, { now = () => new Date() } = {}) {
     const row = await store.insertTicket({
       ticket_no: ticketNo, series: SERIES, year, seq,
       customer_id: customer.id, device_id: customer.device_id || null,
-      status: 'open', urgency, source: 'admin',
+      status: 'open', urgency, source: opts.source === 'customer_app' ? 'customer_app' : 'admin',
       issue_category: category, description,
       site_name: customer.name || null,
       contact_person: contactPerson, contact_phone: contactPhone,
@@ -262,7 +262,7 @@ function createTicketService(store, { now = () => new Date() } = {}) {
       ticket_id: row.id, actor: actor.email, actor_role: actor.role,
       action: 'created', from_status: null, to_status: 'open',
       note: `${category}${urgency === 'urgent' ? ' (urgent)' : ''}`,
-      meta: { ticket_no: ticketNo, source: 'admin' },
+      meta: { ticket_no: ticketNo, source: opts.source === 'customer_app' ? 'customer_app' : 'admin' },
     });
     const ctx = await contextFor();
     return decorate(row, at, ctx.of(row));
@@ -612,6 +612,8 @@ function supabaseStore(sb) {
       .not('status', 'in', '(closed,cancelled)').order('created_at', { ascending: true }).limit(500)),
     listClosed: (n) => one(sb.from('tickets').select('*')
       .in('status', ['closed', 'cancelled']).order('closed_at', { ascending: false }).limit(n)),
+    listByCustomer: (customerId, n) => one(sb.from('tickets').select('*').eq('customer_id', customerId)
+      .order('created_at', { ascending: false }).limit(n)),
     async insertEvent(e) { await one(sb.from('ticket_events').insert([e])); },
     listEvents: (ticketId) => one(sb.from('ticket_events').select('*').eq('ticket_id', ticketId).order('at', { ascending: true })),
     insertPhoto: (row) => one(sb.from('ticket_photos').insert([row]).select().single()),
@@ -659,7 +661,7 @@ function startTicketWatcher(service, cron) {
 }
 
 module.exports = {
-  SERIES, MIDDLE, START_SEQ, CATEGORIES, TRANSITIONS, ACTIONS,
+  STATUS_LABELS, TERMINAL, SERIES, MIDDLE, START_SEQ, CATEGORIES, TRANSITIONS, ACTIONS,
   istParts, formatTicketNo, attentionFor, availableActions, snapshotOf, mediaOf, PHOTO_BUCKET, ONLINE_WINDOW_MS,
   createTicketService, supabaseStore, createTicketsRouter, startTicketWatcher,
 };

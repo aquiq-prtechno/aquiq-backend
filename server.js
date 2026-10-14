@@ -1213,6 +1213,10 @@ const reportService = reportsModule.createReportService(serviceStore, ticketServ
 });
 app.use('/admin/service-reports', require('./reports').createReportsAdminRouter(reportService));
 
+// Customer app: "Request service". Not under /admin: it checks the store id + registered mobile itself.
+const customerApi = require('./customerApi');
+app.use('/customer', customerApi.createCustomerRouter(customerApi.createCustomerService(serviceStore, ticketService)));
+
 // The engineer app (AQUIQ SE-TECH). Not under /admin: it has its own sign-in rules.
 const engineerApi = require('./engineerApi');
 app.use('/engineer', engineerApi.createEngineerApiRouter({

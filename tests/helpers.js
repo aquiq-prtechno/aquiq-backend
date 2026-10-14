@@ -36,6 +36,7 @@ function memStore(customers) {
     },
     async listActive() { return copy(tickets.filter(t => !['closed', 'cancelled'].includes(t.status))); },
     async listClosed() { return copy(tickets.filter(t => ['closed', 'cancelled'].includes(t.status))); },
+    async listByCustomer(cid, n) { return copy(tickets.filter(t => t.customer_id === cid).slice().reverse().slice(0, n)); },
     async insertEvent(e) { events.push({ id: ++ev, at: new Date().toISOString(), ...copy(e) }); },
     async listEvents(id) { return copy(events.filter(e => e.ticket_id === id)); },
     // ── engineers ──
