@@ -7,7 +7,8 @@
 // customer's name, phone or address.
 
 const EXPO_URL = 'https://exp.host/--/api/v2/push/send';
-const CHANNEL = 'complaints';
+const CHANNEL = 'complaints_v2';           // must match the channel created by the app
+const SOUND = 'aquiq_ring.wav';            // AQUIQ alert sound bundled in the engineer app
 
 function createPushService(store, { send, enabled = true, log = console } = {}) {
   const doSend = send || (async (messages) => {
@@ -24,7 +25,7 @@ function createPushService(store, { send, enabled = true, log = console } = {}) 
     const tokens = [...new Set(devices.map(d => d.token))].filter(t => /^Expo(nent)?PushToken\[.+\]$/.test(t));
     if (!tokens.length) return { sent: 0 };
     const messages = tokens.map(to => ({
-      to, title: payload.title, body: payload.body, sound: 'default', priority: 'high', channelId: CHANNEL,
+      to, title: payload.title, body: payload.body, sound: SOUND, priority: 'high', channelId: CHANNEL,
       data: { ticket_id: payload.ticket_id, ticket_no: payload.ticket_no, kind: payload.kind },
     }));
     const dead = [];
