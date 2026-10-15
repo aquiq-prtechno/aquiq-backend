@@ -124,7 +124,7 @@ async function finishedJob(w) {
     const ExcelJS = require('exceljs');
     const wb = new ExcelJS.Workbook(); await wb.xlsx.load(x.buffer);
     const ws = wb.worksheets[0];
-    assert.match(String(ws.getCell('C1').value), /PR TECHNO/);
+    assert.match(String(ws.getCell('C1').value), /AQUIQ/);
     assert.ok(ws.getImages().length >= 1, 'logo in the sheet');
     assert.match(String(ws.getRow(7).getCell(5).value), /^PMR/);
     const p = await w.cs.buildExport(cid, 'pdf');

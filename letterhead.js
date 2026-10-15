@@ -5,8 +5,8 @@ const path = require('path');
 
 const LOGO_PATH = path.join(__dirname, 'assets', 'aquiq-logo.png');
 const LETTERHEAD = {
-  company: 'PR TECHNO Enterprises',
-  product: 'AQUIQ™ Water Monitoring Systems',
+  company: 'AQUIQ™',
+  product: 'Water Monitoring Systems',
   line: 'info@prtechno.in  ·  careprtech@hotmail.com',
 };
 

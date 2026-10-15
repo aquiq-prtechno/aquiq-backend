@@ -106,7 +106,7 @@ const AMBER = '#C25A00';
 function renderPdf(report, images) {
   const PDFDocument = require('pdfkit');
   return new Promise((resolve, reject) => {
-    const doc = new PDFDocument({ size: 'A4', margin: 40, bufferPages: true, info: { Title: `Service Report ${report.report_no}`, Author: 'PR TECHNO / AQUIQ' } });
+    const doc = new PDFDocument({ size: 'A4', margin: 40, bufferPages: true, info: { Title: `Service Report ${report.report_no}`, Author: 'AQUIQ' } });
     const chunks = [];
     doc.on('data', c => chunks.push(c));
     doc.on('end', () => resolve(Buffer.concat(chunks)));
@@ -115,7 +115,7 @@ function renderPdf(report, images) {
 
     const lg = logo();
     if (lg) { try { doc.image(lg, 40, 32, { fit: [58, 58] }); } catch { /* logo is optional */ } }
-    doc.fillColor(AMBER).font('Helvetica-Bold').fontSize(18).text('AQUIQ  by PR TECHNO', 108, 38);
+    doc.fillColor(AMBER).font('Helvetica-Bold').fontSize(18).text('AQUIQ™', 108, 36);
     doc.fillColor(INK).fontSize(24).text('SERVICE REPORT', 108, 62);
     doc.fillColor(MUTED).font('Helvetica').fontSize(10)
       .text(`FSR No: ${report.report_no}`, 40, 44, { width: W, align: 'right' })

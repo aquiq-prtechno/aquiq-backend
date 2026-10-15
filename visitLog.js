@@ -40,7 +40,7 @@ function rowsFrom(tickets, manual) {
 async function buildXlsx({ storeName, rows, generatedAt = new Date() }) {
   const ExcelJS = require('exceljs');
   const wb = new ExcelJS.Workbook();
-  wb.creator = 'AQUIQ / PR TECHNO';
+  wb.creator = 'AQUIQ';
   const ws = wb.addWorksheet('Visit log', { views: [{ state: 'frozen', ySplit: 6 }] });
   ws.columns = [
     { key: 'no', width: 6 }, { key: 'date', width: 14 }, { key: 'time', width: 11 }, { key: 'type', width: 18 },
@@ -86,7 +86,7 @@ function buildPdf({ storeName, rows, generatedAt = new Date() }) {
   const PDFDocument = require('pdfkit');
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ size: 'A4', layout: 'landscape', margin: 40, bufferPages: true,
-      info: { Title: `AQUIQ visit log – ${storeName || ''}`, Author: 'PR TECHNO / AQUIQ' } });
+      info: { Title: `AQUIQ visit log – ${storeName || ''}`, Author: 'AQUIQ' } });
     const chunks = [];
     doc.on('data', c => chunks.push(c));
     doc.on('end', () => resolve(Buffer.concat(chunks)));
