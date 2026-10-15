@@ -211,7 +211,7 @@ async function toWorkDone(w, e, t) {
     await w.ts.engineerAct(e, t.id, { action: 'arrive' });
     const vid = await w.ts.engineerPhotoUpload(e, t.id, { content_type: 'video/mp4', kind: 'other' });
     assert.strictEqual(vid.media_type, 'video');
-    assert.strictEqual(vid.max_bytes, 50 * 1024 * 1024);
+    assert.strictEqual(vid.max_bytes, 20 * 1024 * 1024);
     for (let n = 1; n <= 3; n++) {
       const p = PHOTO(t.id, n, 'mp4'); w.store.files.add(p);
       await w.ts.engineerAddPhoto(e, t.id, { path: p, kind: 'other', mime: 'video/mp4' });

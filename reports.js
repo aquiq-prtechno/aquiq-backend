@@ -301,7 +301,12 @@ function createReportService(store, tickets, { now = () => new Date(), mailer, f
       for (const p of photos.slice(0, 18)) {
         try {
           const url = await store.signedReadUrl(PHOTO_BUCKET, p.path, 300);
-          images.push({ kind: p.kind === 'other' ? '' : p.kind, buffer: await fetchBytes(url) });
+          let buffer = await fetchBytes(url);
+          try {                                  // shrink for the PDF: keeps each report small
+            buffer = await require('sharp')(buffer).rotate().resize({ width: 900, withoutEnlargement: true })
+              .jpeg({ quality: 62 }).toBuffer();
+          } catch { /* not resizable: use the original */ }
+          images.push({ kind: p.kind === 'other' ? '' : p.kind, buffer });
         } catch { /* a photo that can't be fetched is left out of the PDF; it stays on the job */ }
       }
     }
