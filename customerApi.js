@@ -109,7 +109,8 @@ function createCustomerService(store, tickets, { now = () => new Date(), reports
       const v = view(t);
       if (t.status === 'closed' && store.getReportByTicket) {
         const r = await store.getReportByTicket(t.id).catch(() => null);
-        v.report_available = !!(r && r.pdf_path);
+        v.report_available = !!(r && (r.pdf_path || r.pdf_purged_at || r.media_purged_at || r.report_no));
+        v.rating = r && r.rating != null ? r.rating : null;
         v.report_no = r ? r.report_no : null;
       }
       out.push(v);
@@ -140,6 +141,19 @@ function createCustomerService(store, tickets, { now = () => new Date(), reports
     if (reason.length < 3) throw httpError(400, 'Please tell us what is still wrong.');
     const out = await tickets.act(t.id, { action: 'not_satisfied', note: reason }, { email: `customer: ${c.name || c.id}`, role: 'customer' });
     return { ticket: view(out) };
+  }
+
+  async function rate(input) {
+    const c = await who(input);
+    const t = await ownTicket(c, input.ticket_id);
+    const n = Number(input.rating);
+    if (!Number.isInteger(n) || n < 1 || n > 5) throw httpError(400, 'Please choose a rating from 1 to 5.');
+    if (t.status !== 'closed') throw httpError(409, 'You can rate a service once it is finished.');
+    const r = await store.getReportByTicket(t.id);
+    if (!r) throw httpError(404, 'The service report is not ready yet.');
+    if (r.rating != null) throw httpError(409, 'You have already rated this service. Thank you!');
+    await store.updateReport(r.id, { rating: n, rating_comment: clean(input.comment, 500) || null, rated_at: now().toISOString() });
+    return { ok: true, rating: n };
   }
 
   async function report(input) {
@@ -186,7 +200,7 @@ function createCustomerService(store, tickets, { now = () => new Date(), reports
       : { buffer: await visitLog.buildXlsx(args), type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', name: 'AQUIQ-visit-log.xlsx' };
   }
 
-  return { request, list, approve, notSatisfied, report, visits, exportLink, buildExport };
+  return { request, list, approve, notSatisfied, report, rate, visits, exportLink, buildExport };
 }
 
 function createCustomerRouter(service) {
@@ -203,6 +217,7 @@ function createCustomerRouter(service) {
   router.post('/service-request/approve', wrap((req) => service.approve(req.body || {})));
   router.post('/service-request/not-satisfied', wrap((req) => service.notSatisfied(req.body || {})));
   router.post('/service-request/report', wrap((req) => service.report(req.body || {})));
+  router.post('/service-request/rate', wrap((req) => service.rate(req.body || {})));
   router.post('/visit-log', wrap((req) => service.visits(req.body || {})));
   router.post('/visit-log/export', wrap((req) => service.exportLink(req.body || {})));
   return router;

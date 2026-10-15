@@ -55,12 +55,12 @@ async function engineerOnJob(w, name = 'Ravi', phone = '9876543210') {
   return { e, t };
 }
 async function toWorkDone(w, e, t) {
-  await w.ts.engineerAct(e, t.id, { action: 'arrive' });
+  await w.ts.engineerAct(e, t.id, { action: 'arrive', lat: 28.45, lng: 77.02 });
   for (const [n, kind] of [[1, 'before'], [2, 'after']]) {
     const path = PHOTO(t.id, n); w.store.files.add(path);
     await w.ts.engineerAddPhoto(e, t.id, { path, kind, mime: 'image/jpeg' });
   }
-  await w.ts.engineerAct(e, t.id, { action: 'work_done' });
+  await w.ts.engineerAct(e, t.id, { action: 'work_done', checklist: { flushed: true, leaks: true, tds: true, pump: true, clean: true } });
 }
 
 (async () => {
@@ -148,8 +148,8 @@ async function toWorkDone(w, e, t) {
 
   await test('the report cannot be saved without at least one site photo', async () => {
     const w = world(); const { e, t } = await engineerOnJob(w);
-    await w.ts.engineerAct(e, t.id, { action: 'arrive' });
-    await w.ts.engineerAct(e, t.id, { action: 'work_done' });      // no photos needed to finish the work
+    await w.ts.engineerAct(e, t.id, { action: 'arrive', lat: 28.45, lng: 77.02 });
+    await w.ts.engineerAct(e, t.id, { action: 'work_done', checklist: { flushed: true, leaks: true, tds: true, pump: true, clean: true } });      // no photos needed to finish the work
     await w.ts.act(t.id, { action: 'approve_on_behalf', note: 'ok' }, ADMIN);
     await ok400(w.rs.submit(e, t.id, FORM), 400, /site photo/);
     const path = PHOTO(t.id, 1); w.store.files.add(path);
@@ -208,7 +208,7 @@ async function toWorkDone(w, e, t) {
 
   await test('photos and videos: up to 20 photos and 3 videos, counted separately; videos need a video type', async () => {
     const w = world(); const { e, t } = await engineerOnJob(w);
-    await w.ts.engineerAct(e, t.id, { action: 'arrive' });
+    await w.ts.engineerAct(e, t.id, { action: 'arrive', lat: 28.45, lng: 77.02 });
     const vid = await w.ts.engineerPhotoUpload(e, t.id, { content_type: 'video/mp4', kind: 'other' });
     assert.strictEqual(vid.media_type, 'video');
     assert.strictEqual(vid.max_bytes, 20 * 1024 * 1024);

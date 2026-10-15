@@ -54,3 +54,11 @@ alter table tickets add column if not exists eng_loc_at timestamptz;
 -- 7) 12-month clean-up: remember when a report's photos/videos and PDF were removed.
 alter table service_reports add column if not exists media_purged_at timestamptz;
 alter table service_reports add column if not exists pdf_purged_at timestamptz;
+
+-- 8) Engineer duty switch, SOP acceptance, and the customer's rating of a finished service.
+alter table engineers add column if not exists on_duty boolean not null default true;
+alter table engineers add column if not exists sop_version text;
+alter table engineers add column if not exists sop_accepted_at timestamptz;
+alter table service_reports add column if not exists rating int;
+alter table service_reports add column if not exists rating_comment text;
+alter table service_reports add column if not exists rated_at timestamptz;

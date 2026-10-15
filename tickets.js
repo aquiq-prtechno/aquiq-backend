@@ -12,7 +12,8 @@
 
 const express = require('express');
 const crypto = require('crypto');
-const { rankEngineers, coverageOf } = require('./engineers');
+const { rankEngineers, coverageOf, haversineKm } = require('./engineers');
+const { ARRIVAL_RADIUS_M, CHECKLIST, NO_GPS_REASONS } = require('./fieldRules');
 
 const SERIES = 'PMR';
 const MIDDLE = '117';
@@ -266,7 +267,8 @@ function createTicketService(store, { now = () => new Date(), push = null } = {}
     });
     const ctx = await contextFor();
     if (push) {
-      const ids = rankEngineers(siteOf(row), ctx.engineers).recommended.map(e => e.id);
+      const onDuty = new Set(ctx.engineers.filter(e => e.on_duty !== false).map(e => e.id));
+      const ids = rankEngineers(siteOf(row), ctx.engineers).recommended.map(e => e.id).filter(id => onDuty.has(id));
       push.newComplaint(row, ids);                     // fire and forget; never blocks the ticket
     }
     return decorate(row, at, ctx.of(row));
@@ -476,16 +478,26 @@ function createTicketService(store, { now = () => new Date(), push = null } = {}
     };
   }
 
+  // same customer had a finished service in the last 30 days: quality / warranty flag
+  async function repeatOf(t, at) {
+    if (!store.listByCustomer || !t.customer_id) return false;
+    const cutoff = at.getTime() - 30 * 86400000;
+    const rows = await store.listByCustomer(t.customer_id, 10);
+    return rows.some(x => x.id !== t.id && x.status === 'closed' && toMs(x.closed_at) >= cutoff);
+  }
+
   async function engineerJobs(eng) {
     const at = now();
     const declined = new Set(await store.listDeclinedTicketIds(eng.id));
     const active = await store.listActive();
     const offers = [];
+    const onDuty = eng.on_duty !== false;
     for (const t of active) {
+      if (!onDuty) break;
       if (t.status !== 'open' && t.status !== 'reopened') continue;
       if (t.engineer_id === eng.id || declined.has(t.id)) continue;
       const cov = coverageOf(eng, siteOf(t));
-      if (cov) offers.push(offerView(t, cov, at));
+      if (cov) offers.push({ ...offerView(t, cov, at), repeat_within_30d: await repeatOf(t, at) });
     }
     offers.sort((a, b) => (a.urgency === 'urgent' ? 0 : 1) - (b.urgency === 'urgent' ? 0 : 1) || toMs(a.created_at) - toMs(b.created_at));
     const mine = [];
@@ -536,8 +548,39 @@ function createTicketService(store, { now = () => new Date(), push = null } = {}
     if (!ENGINEER_ACTIONS.includes(action)) throw httpError(400, 'That action is not available to engineers.');
     if (t.engineer_id !== eng.id) throw httpError(403, 'This job is not assigned to you.');
 
-    await act(id, { action, note: input.note }, actor);
+    let note = input.note;
+    if (action === 'arrive') note = arrivalNote(t, input);
+    if (action === 'work_done') {
+      const ticks = input.checklist && typeof input.checklist === 'object' ? input.checklist : {};
+      if (!CHECKLIST.every(c => ticks[c.key] === true)) throw httpError(400, 'Please tick every item in the checklist before marking the work done.');
+    }
+    await act(id, { action, note }, actor);
+    if (action === 'work_done') {
+      await store.insertEvent({
+        ticket_id: id, actor: actor.email, actor_role: 'engineer', action: 'checklist',
+        from_status: 'work_done', to_status: 'work_done', note: `${CHECKLIST.length} of ${CHECKLIST.length} steps completed`,
+        meta: { checklist: CHECKLIST.map(c => c.key) },
+      });
+    }
     return engineerJob(eng, id);
+  }
+
+  // "Arrived" counts only at the site. Without a position, the engineer must say why.
+  function arrivalNote(t, input) {
+    const siteHas = t.latitude != null && t.longitude != null;
+    if (!siteHas) return 'arrived (site has no map position)';
+    const lat = Number(input.lat); const lng = Number(input.lng);
+    if (Number.isFinite(lat) && Number.isFinite(lng)) {
+      const m = haversineKm(lat, lng, Number(t.latitude), Number(t.longitude)) * 1000;
+      if (m > ARRIVAL_RADIUS_M) {
+        const far = m < 1000 ? `${Math.round(m / 10) * 10} m` : `${(m / 1000).toFixed(1)} km`;
+        throw httpError(409, `You are about ${far} from the site. Please reach the site, then tap Arrived.`);
+      }
+      return `arrived at site (${Math.round(m)} m from the pin)`;
+    }
+    const why = NO_GPS_REASONS.find(r => r.key === String(input.no_gps_reason || ''));
+    if (!why) throw httpError(409, 'Please turn on your location so we can confirm you reached the site.');
+    return `arrived without a location check: ${why.en}`;
   }
 
   async function engineerPhotoUpload(eng, id, input) {
@@ -606,10 +649,30 @@ function createTicketService(store, { now = () => new Date(), push = null } = {}
     return { ok: true };
   }
 
+  // Performance numbers for one engineer (admin only).
+  async function engineerScorecard(engineerId) {
+    if (!UUID_RE.test(String(engineerId))) throw httpError(400, 'Invalid engineer.');
+    const rows = await store.listByEngineer(engineerId, 1000);
+    const done = rows.filter(t => t.status === 'closed');
+    const mins = (a, b) => (toMs(a) != null && toMs(b) != null ? (toMs(a) - toMs(b)) / 60000 : null);
+    const accept = rows.map(t => mins(t.accepted_at, t.open_since || t.created_at)).filter(v => v != null && v >= 0);
+    const timed = rows.filter(t => t.eta_at && t.arrived_at);
+    const onTime = timed.filter(t => toMs(t.arrived_at) <= toMs(t.eta_at) + 5 * 60000).length;
+    const ratings = store.listRatings ? await store.listRatings(engineerId) : [];
+    const rated = ratings.filter(r => r.rating != null);
+    const avg = (a) => (a.length ? Math.round((a.reduce((x, y) => x + y, 0) / a.length) * 10) / 10 : null);
+    return {
+      jobs_total: rows.length, jobs_done: done.length, jobs_active: rows.filter(t => !TERMINAL.includes(t.status)).length,
+      avg_accept_minutes: avg(accept), on_time_pct: timed.length ? Math.round((onTime / timed.length) * 100) : null,
+      avg_rating: avg(rated.map(r => r.rating)), ratings_count: rated.length,
+      without_approval: ratings.filter(r => r.approval_mode === 'engineer_override').length,
+    };
+  }
+
   return {
     create, act, list, detail, summary, runWatcher,
     engineerJobs, engineerJob, engineerAct, engineerPhotoUpload, engineerAddPhoto,
-    engineerHistory, engineerLocation,
+    engineerHistory, engineerLocation, engineerScorecard,
   };
 }
 
@@ -645,6 +708,9 @@ function supabaseStore(sb) {
       .not('status', 'in', '(closed,cancelled)').order('created_at', { ascending: true }).limit(500)),
     listClosed: (n) => one(sb.from('tickets').select('*')
       .in('status', ['closed', 'cancelled']).order('closed_at', { ascending: false }).limit(n)),
+    listByEngineer: (engineerId, n) => one(sb.from('tickets').select('*').eq('engineer_id', engineerId)
+      .order('created_at', { ascending: false }).limit(n)),
+    listRatings: (engineerId) => one(sb.from('service_reports').select('rating,approval_mode').eq('engineer_id', engineerId)),
     listClosedByEngineer: (engineerId, n) => one(sb.from('tickets').select('*').eq('engineer_id', engineerId)
       .eq('status', 'closed').order('closed_at', { ascending: false }).limit(n)),
     async setEngineerLocation(id, lat, lng, at) {

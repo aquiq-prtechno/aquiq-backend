@@ -36,6 +36,8 @@ function memStore(customers) {
     },
     async listActive() { return copy(tickets.filter(t => !['closed', 'cancelled'].includes(t.status))); },
     async listClosed() { return copy(tickets.filter(t => ['closed', 'cancelled'].includes(t.status))); },
+    async listByEngineer(eid, n) { return copy(tickets.filter(t => t.engineer_id === eid).slice().reverse().slice(0, n)); },
+    async listRatings() { return copy(this.ratingRows || []); },
     async listClosedByEngineer(eid, n) { return copy(tickets.filter(t => t.engineer_id === eid && t.status === 'closed').slice().reverse().slice(0, n)); },
     async setEngineerLocation(id, lat, lng, at) { const t = tickets.find(x => x.id === id); Object.assign(t, { eng_lat: lat, eng_lng: lng, eng_loc_at: at }); },
     async listByCustomer(cid, n) { return copy(tickets.filter(t => t.customer_id === cid).slice().reverse().slice(0, n)); },
@@ -114,4 +116,5 @@ function fakeAccounts() {
   };
 }
 
-module.exports = { memStore, clock, ok400, CUST, customers, ADMIN, fakeAccounts };
+const ALL_TICKS = { flushed: true, leaks: true, tds: true, pump: true, clean: true };
+module.exports = { ALL_TICKS, memStore, clock, ok400, CUST, customers, ADMIN, fakeAccounts };

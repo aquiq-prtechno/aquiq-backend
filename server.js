@@ -1207,6 +1207,10 @@ const pushService = require('./push').createPushService(serviceStore, { enabled:
 const ticketService = ticketsModule.createTicketService(serviceStore, { push: pushService });
 const engineerService = engineersModule.createEngineerService(serviceStore, { auth: engineerAccounts });
 app.use('/admin/tickets', ticketsModule.createTicketsRouter(ticketService));
+app.get('/admin/engineers/:id/scorecard', async (req, res) => {
+  try { res.json(await ticketService.engineerScorecard(req.params.id)); }
+  catch (err) { res.status(err.status || 500).json({ error: err.status ? err.message : 'Something went wrong.' }); }
+});
 app.use('/admin/engineers', engineersModule.createEngineersRouter(engineerService));
 const reportService = reportsModule.createReportService(serviceStore, ticketService, {
   mailer: reportsModule.createMailer(),

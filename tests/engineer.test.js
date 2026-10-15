@@ -136,10 +136,10 @@ const asEng = async (store, id) => store.getEngineer(id);
   }
   await test('photos: work done needs no photos (they go in the report); photos and videos attach to the job', async () => {
     const { ts, store, eng, t } = await accepted();
-    await ts.engineerAct(eng, t.id, { action: 'arrive' });
+    await ts.engineerAct(eng, t.id, { action: 'arrive', lat: 28.45, lng: 77.02 });
     store.files.add(PHOTO(t.id, 1));
     await ts.engineerAddPhoto(eng, t.id, { path: PHOTO(t.id, 1), kind: 'other' });
-    const job = await ts.engineerAct(eng, t.id, { action: 'work_done' });
+    const job = await ts.engineerAct(eng, t.id, { action: 'work_done', checklist: { flushed: true, leaks: true, tds: true, pump: true, clean: true } });
     assert.strictEqual(job.status, 'work_done');
     assert.strictEqual(job.photos.length, 1);
     store.files.add(PHOTO(t.id, 2));
@@ -167,7 +167,7 @@ const asEng = async (store, id) => store.getEngineer(id);
     const { ts, store, t, es } = await accepted();
     const other = await asEng(store, (await reg(es, 'Amit', { phone: '9811100000' })).id);
     await ok400(ts.engineerJob(other, t.id), 404, /not assigned/);
-    await ok400(ts.engineerAct(other, t.id, { action: 'arrive' }), 403, /not assigned/);
+    await ok400(ts.engineerAct(other, t.id, { action: 'arrive', lat: 28.45, lng: 77.02 }), 403, /not assigned/);
     await ok400(ts.engineerAct(other, t.id, { action: 'close' }), 400, /not available to engineers/);
   });
   await test('drop: a reason is required; the job goes back to open and out to everyone', async () => {
@@ -230,7 +230,7 @@ const asEng = async (store, id) => store.getEngineer(id);
       assert.strictEqual(jobs.s, 200); assert.strictEqual(jobs.b.offers.length, 1);
       const acc = await call(`/jobs/${t.id}/action`, { token: tok, body: { action: 'accept', eta_minutes: 40 } });
       assert.strictEqual(acc.s, 200); assert.strictEqual(acc.b.job.status, 'accepted');
-      assert.strictEqual((await call(`/jobs/${t.id}/action`, { token: tok, body: { action: 'work_done' } })).s, 409);   // not arrived yet
+      assert.strictEqual((await call(`/jobs/${t.id}/action`, { token: tok, body: { action: 'work_done', checklist: { flushed: true, leaks: true, tds: true, pump: true, clean: true } } })).s, 409);   // not arrived yet
       assert.strictEqual((await call('/device', { token: tok, body: { token: 'ExponentPushToken[abcdefghij]', platform: 'android' } })).s, 200);
       assert.strictEqual(store.devices.length, 1);
 

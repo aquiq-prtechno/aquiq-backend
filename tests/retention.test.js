@@ -47,8 +47,8 @@ async function finishedJob(w) {
   const o = await w.cs.request(ASK);
   await w.ts.act(o.ticket.id, { action: 'accept', engineer_id: eng.id }, ADMIN);
   const e = await w.store.getEngineer(eng.id);
-  await w.ts.engineerAct(e, o.ticket.id, { action: 'arrive' });
-  await w.ts.engineerAct(e, o.ticket.id, { action: 'work_done' });
+  await w.ts.engineerAct(e, o.ticket.id, { action: 'arrive', lat: 28.45, lng: 77.02 });
+  await w.ts.engineerAct(e, o.ticket.id, { action: 'work_done', checklist: { flushed: true, leaks: true, tds: true, pump: true, clean: true } });
   await w.ts.act(o.ticket.id, { action: 'approve_on_behalf', note: 'ok' }, ADMIN);
   const p = PHOTO(o.ticket.id, 1); w.store.files.add(p);
   await w.ts.engineerAddPhoto(e, o.ticket.id, { path: p, kind: 'other', mime: 'image/jpeg' });

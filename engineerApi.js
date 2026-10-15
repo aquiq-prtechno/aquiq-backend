@@ -7,6 +7,7 @@
 // An engineer can only ever reach their own jobs and the offers covering their area.
 
 const express = require('express');
+const { CHECKLIST, PARTS, NO_GPS_REASONS, SOP_VERSION, ARRIVAL_RADIUS_M } = require('./fieldRules');
 
 const MESSAGES = {
   missing_token: 'Sign in required.',
@@ -68,10 +69,34 @@ function createEngineerApiRouter({ tickets, store, auth, accounts, reports }) {
   router.get('/me', guard(true), wrap(async (req) => ({
     engineer: {
       engineer_code: req.engineer.engineer_code, name: req.engineer.name, phone: req.engineer.phone,
-      pincode: req.engineer.pincode, city: req.engineer.city,
+      pincode: req.engineer.pincode, city: req.engineer.city, designation: req.engineer.designation || null,
+      on_duty: req.engineer.on_duty !== false,
     },
     must_change_password: req.mustChange,
+    sop: { required: SOP_VERSION, accepted: req.engineer.sop_version || null, accepted_at: req.engineer.sop_accepted_at || null },
+    rules: { checklist: CHECKLIST, parts: PARTS, no_gps_reasons: NO_GPS_REASONS, arrival_radius_m: ARRIVAL_RADIUS_M },
   })));
+
+  // on / off duty: off-duty engineers get no new complaints and no alerts
+  router.post('/duty', guard(), wrap(async (req) => {
+    const on = !!(req.body || {}).on_duty;
+    await store.updateEngineer(req.engineer.id, { on_duty: on, updated_at: new Date().toISOString() });
+    return { on_duty: on };
+  }));
+
+  // the engineer has read and accepted the rules and SOPs (current version)
+  router.post('/sops/accept', guard(), wrap(async (req) => {
+    if (String((req.body || {}).version) !== SOP_VERSION) {
+      const e = new Error('The rules were updated. Please open them again and accept the latest version.'); e.status = 409; throw e;
+    }
+    const at = new Date().toISOString();
+    await store.updateEngineer(req.engineer.id, { sop_version: SOP_VERSION, sop_accepted_at: at, updated_at: at });
+    await store.insertEngineerEvent({
+      engineer_id: req.engineer.id, actor: req.engineer.engineer_code, actor_role: 'engineer',
+      action: 'sop_accepted', note: SOP_VERSION, meta: { version: SOP_VERSION },
+    });
+    return { ok: true, version: SOP_VERSION, accepted_at: at };
+  }));
 
   router.post('/password', guard(true), wrap(async (req) => {
     const pw = (req.body || {}).new_password;

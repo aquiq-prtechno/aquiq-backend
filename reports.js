@@ -14,6 +14,7 @@ const express = require('express');
 const { istParts, snapshotOf, mediaOf, PHOTO_BUCKET, ONLINE_WINDOW_MS } = require('./tickets');
 const { logo, stampFooters, LETTERHEAD } = require('./letterhead');
 const fileLinks = require('./fileLinks');
+const { PARTS, CHECKLIST } = require('./fieldRules');
 
 const REPORT_BUCKET = 'service-reports';
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -151,6 +152,8 @@ function renderPdf(report, images) {
       ['Output flow (device)', dr.output_flow], ['Reject flow (device)', dr.reject_flow],
       ['Membrane (device)', dr.membrane], ['Pump (device)', dr.pump_condition],
       ['Load', d.load],
+      ['Spare parts used', (d.parts && d.parts.length) ? d.parts.map(p => `${p.name} × ${p.qty}`).join(',  ') : 'None'],
+      ['Work checklist', d.checklist_done != null ? `${d.checklist_done} of ${CHECKLIST.length} steps completed` : '—'],
     ];
     if (d.remarks) rows.push(['Remarks / Notes', d.remarks]);   // only when the engineer wrote something
     rows.forEach(([k, v], i) => {
@@ -276,7 +279,7 @@ function createReportService(store, tickets, { now = () => new Date(), mailer, f
     return {
       state, ...head,
       device: deviceReadings(customer, at),
-      options: OPTIONS, required: REQUIRED, reasons: OVERRIDE_REASONS,
+      options: OPTIONS, required: REQUIRED, reasons: OVERRIDE_REASONS, parts: PARTS,
       filed: existing ? { report_no: existing.report_no, created_at: existing.created_at } : null,
     };
   }
@@ -291,6 +294,17 @@ function createReportService(store, tickets, { now = () => new Date(), mailer, f
     const missing = REQUIRED.filter(k => !d[k]);
     if (missing.length) throw httpError(400, `Please fill in: ${missing.map(m => m.replace(/_/g, ' ')).join(', ')}.`);
     d.remarks = clean(input.remarks, 1500) || null;
+    d.parts = [];
+    const parts = Array.isArray(input.parts) ? input.parts.slice(0, 15) : [];
+    for (const p of parts) {
+      const name = clean(p && p.name, 60);
+      const base = name.startsWith('Other:') ? 'Other' : name;
+      if (!PARTS.includes(base)) throw httpError(400, `"${name}" is not in the spare parts list.`);
+      if (base === 'Other' && clean(name.replace(/^Other:/, ''), 40).length < 2) throw httpError(400, 'Write the name of the spare part.');
+      const qty = Number(p.qty);
+      if (!Number.isInteger(qty) || qty < 1 || qty > 50) throw httpError(400, 'Spare part quantity must be a number from 1 to 50.');
+      d.parts.push({ name, qty });
+    }
     return d;
   }
 
@@ -338,6 +352,8 @@ function createReportService(store, tickets, { now = () => new Date(), mailer, f
     }
 
     const data = validate(input);
+    const cl = (await store.listEvents(t.id)).filter(e => e.action === 'checklist').pop();
+    data.checklist_done = cl && cl.meta && Array.isArray(cl.meta.checklist) ? cl.meta.checklist.length : 0;
     if (!(await store.listPhotos(t.id)).some(m => mediaOf(m) === 'photo')) {
       throw httpError(400, 'Add at least one site photo before saving the report.');
     }

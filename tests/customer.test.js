@@ -85,8 +85,8 @@ const ASK = { store_id: CUST, phone: '99999 00000', issue_category: 'Low or no w
     const o = await w.cs.request(ASK);
     await w.ts.act(o.ticket.id, { action: 'accept', engineer_id: eng.id, eta_minutes: 30 }, ADMIN);
     const e = await w.store.getEngineer(eng.id);
-    await w.ts.engineerAct(e, o.ticket.id, { action: 'arrive' });
-    await w.ts.engineerAct(e, o.ticket.id, { action: 'work_done' });
+    await w.ts.engineerAct(e, o.ticket.id, { action: 'arrive', lat: 28.45, lng: 77.02 });
+    await w.ts.engineerAct(e, o.ticket.id, { action: 'work_done', checklist: { flushed: true, leaks: true, tds: true, pump: true, clean: true } });
     return { id: o.ticket.id, e };
   }
 
@@ -143,7 +143,7 @@ const ASK = { store_id: CUST, phone: '99999 00000', issue_category: 'Low or no w
     assert.strictEqual(typeof loc.site.lat, 'number');
     w.c.add(15 * 60);                                                                     // stale after 10 minutes
     assert.strictEqual((await w.cs.list(ASK)).tickets[0].engineer_location, null);
-    await w.ts.engineerAct(e, o.ticket.id, { action: 'arrive' });
+    await w.ts.engineerAct(e, o.ticket.id, { action: 'arrive', lat: 28.45, lng: 77.02 });
     await w.ts.engineerLocation(e, o.ticket.id, { lat: 28.45, lng: 77.02 });
     assert.strictEqual((await w.cs.list(ASK)).tickets[0].engineer_location, null);        // arrived: tracking stops
   });
@@ -155,8 +155,8 @@ const ASK = { store_id: CUST, phone: '99999 00000', issue_category: 'Low or no w
     const o = await w.cs.request(ASK);
     await w.ts.act(o.ticket.id, { action: 'accept', engineer_id: eng.id }, ADMIN);
     assert.strictEqual((await w.ts.engineerHistory(e)).length, 0);
-    await w.ts.engineerAct(e, o.ticket.id, { action: 'arrive' });
-    await w.ts.engineerAct(e, o.ticket.id, { action: 'work_done' });
+    await w.ts.engineerAct(e, o.ticket.id, { action: 'arrive', lat: 28.45, lng: 77.02 });
+    await w.ts.engineerAct(e, o.ticket.id, { action: 'work_done', checklist: { flushed: true, leaks: true, tds: true, pump: true, clean: true } });
     await w.ts.act(o.ticket.id, { action: 'approve_on_behalf', note: 'ok' }, ADMIN);
     await w.ts.act(o.ticket.id, { action: 'close', note: 'done' }, ADMIN);
     const h = await w.ts.engineerHistory(e);
