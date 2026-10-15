@@ -128,6 +128,41 @@ const ASK = { store_id: CUST, phone: '99999 00000', issue_category: 'Low or no w
     assert.strictEqual(r.report_no, 'FSR-X');
   });
 
+  await test('customer sees how far the engineer is and roughly how long, only while on the way', async () => {
+    const w = world();
+    const eng = await w.es.register({ name: 'Ravi', phone: '9876543210', pincode: '122001', id_proof_type: 'pan', id_proof_ref: 'ABCDE1234F' }, ADMIN);
+    const o = await w.cs.request(ASK);
+    await w.ts.act(o.ticket.id, { action: 'accept', engineer_id: eng.id, eta_minutes: 30 }, ADMIN);
+    const e = await w.store.getEngineer(eng.id);
+    assert.strictEqual((await w.cs.list(ASK)).tickets[0].engineer_location, null);       // no position yet
+    await ok400(w.ts.engineerLocation(e, o.ticket.id, { lat: 1, lng: 1 }), 400, /not valid/);
+    await w.ts.engineerLocation(e, o.ticket.id, { lat: 28.50, lng: 77.10 });             // ~10 km from the site
+    const loc = (await w.cs.list(ASK)).tickets[0].engineer_location;
+    assert.ok(loc.distance_km > 5 && loc.distance_km < 30, `distance ${loc.distance_km}`);
+    assert.ok(loc.eta_minutes >= 5 && loc.eta_minutes <= 90);
+    w.c.add(15 * 60);                                                                     // stale after 10 minutes
+    assert.strictEqual((await w.cs.list(ASK)).tickets[0].engineer_location, null);
+    await w.ts.engineerAct(e, o.ticket.id, { action: 'arrive' });
+    await w.ts.engineerLocation(e, o.ticket.id, { lat: 28.45, lng: 77.02 });
+    assert.strictEqual((await w.cs.list(ASK)).tickets[0].engineer_location, null);        // arrived: tracking stops
+  });
+
+  await test('engineer history lists finished jobs only, newest first', async () => {
+    const w = world();
+    const eng = await w.es.register({ name: 'Ravi', phone: '9876543210', pincode: '122001', id_proof_type: 'pan', id_proof_ref: 'ABCDE1234F' }, ADMIN);
+    const e = await w.store.getEngineer(eng.id);
+    const o = await w.cs.request(ASK);
+    await w.ts.act(o.ticket.id, { action: 'accept', engineer_id: eng.id }, ADMIN);
+    assert.strictEqual((await w.ts.engineerHistory(e)).length, 0);
+    await w.ts.engineerAct(e, o.ticket.id, { action: 'arrive' });
+    await w.ts.engineerAct(e, o.ticket.id, { action: 'work_done' });
+    await w.ts.act(o.ticket.id, { action: 'approve_on_behalf', note: 'ok' }, ADMIN);
+    await w.ts.act(o.ticket.id, { action: 'close', note: 'done' }, ADMIN);
+    const h = await w.ts.engineerHistory(e);
+    assert.strictEqual(h.length, 1);
+    assert.strictEqual(h[0].report_no, `FSR-${h[0].ticket_no}`);
+  });
+
   for (const [s, n] of results) console.log(`${s}  ${n}`);
   const failed = results.filter(r => r[0] === 'FAIL').length;
   console.log(failed ? `\n${failed} FAILED, ${passed} passed` : `\nALL ${passed} PASSED`);

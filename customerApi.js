@@ -23,6 +23,17 @@ function httpError(status, message) { const e = new Error(message); e.status = s
 const digits = (v) => String(v == null ? '' : v).replace(/\D/g, '').slice(-10);
 const clean = (v, max) => String(v == null ? '' : v).replace(/[\u0000-\u001f]+/g, ' ').trim().slice(0, max);
 
+const toRad = (d) => (d * Math.PI) / 180;
+function km(a, b) {
+  const R = 6371;
+  const dLat = toRad(b.lat - a.lat); const dLng = toRad(b.lng - a.lng);
+  const x = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(x));
+}
+const LOCATION_FRESH_MS = 10 * 60 * 1000;
+const ROAD_FACTOR = 1.4;       // straight line -> typical road distance
+const AVG_KMH = 28;            // average city speed for a two-wheeler
+
 function createCustomerService(store, tickets, { now = () => new Date() } = {}) {
   async function who(input) {
     const id = String(input.store_id || '');
@@ -35,6 +46,19 @@ function createCustomerService(store, tickets, { now = () => new Date() } = {}) 
     return c;
   }
 
+  // Where the engineer is and roughly how long they need — only while they are on the way.
+  function trackOf(t) {
+    if (t.status !== 'accepted' || t.eng_lat == null || t.eng_lng == null || !t.eng_loc_at) return null;
+    if (now().getTime() - new Date(t.eng_loc_at).getTime() > LOCATION_FRESH_MS) return null;
+    const out = { lat: Number(t.eng_lat), lng: Number(t.eng_lng), updated_at: t.eng_loc_at };
+    if (t.latitude != null && t.longitude != null) {
+      const straight = km({ lat: out.lat, lng: out.lng }, { lat: Number(t.latitude), lng: Number(t.longitude) });
+      out.distance_km = Math.round(straight * ROAD_FACTOR * 10) / 10;
+      out.eta_minutes = Math.max(1, Math.round((out.distance_km / AVG_KMH) * 60));
+    }
+    return out;
+  }
+
   function view(t) {
     return {
       id: t.id, ticket_no: t.ticket_no, status: t.status, status_label: STATUS_LABELS[t.status] || t.status,
@@ -43,6 +67,7 @@ function createCustomerService(store, tickets, { now = () => new Date() } = {}) 
       eta_at: t.status === 'accepted' ? t.eta_at : null,
       active: !TERMINAL.includes(t.status),
       can_respond: t.status === 'work_done',          // the customer may approve or say not satisfied
+      engineer_location: trackOf(t),
     };
   }
 

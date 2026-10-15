@@ -45,3 +45,8 @@ update storage.buckets
 
 -- 5) Designation printed under the engineer's name on every service report.
 alter table engineers add column if not exists designation text;
+
+-- 6) Engineer's latest position while on the way (for the customer's "how long until they arrive").
+alter table tickets add column if not exists eng_lat double precision;
+alter table tickets add column if not exists eng_lng double precision;
+alter table tickets add column if not exists eng_loc_at timestamptz;

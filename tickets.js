@@ -582,9 +582,34 @@ function createTicketService(store, { now = () => new Date(), push = null } = {}
     return { id: row.id, kind: row.kind, media_type: mediaOf(row), caption: row.caption, created_at: row.created_at };
   }
 
+  // The engineer's finished jobs (what they took and resolved), newest first.
+  async function engineerHistory(eng) {
+    const rows = await store.listClosedByEngineer(eng.id, 100);
+    return rows.map(t => ({
+      id: t.id, ticket_no: t.ticket_no, site_name: t.site_name, address: t.address,
+      issue_category: t.issue_category, accepted_at: t.accepted_at, work_done_at: t.work_done_at,
+      closed_at: t.closed_at, report_no: `FSR-${t.ticket_no}`,
+    }));
+  }
+
+  // The engineer's phone reports where it is while they are on the way (accepted / arrived).
+  async function engineerLocation(eng, id, input) {
+    if (!UUID_RE.test(String(id))) throw httpError(400, 'Invalid job.');
+    const t = await store.getTicket(id);
+    if (!t || t.engineer_id !== eng.id) throw httpError(404, 'This job is not assigned to you.');
+    if (!['accepted', 'arrived'].includes(t.status)) return { ok: true, ignored: true };
+    const lat = Number(input.lat); const lng = Number(input.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < 6 || lat > 38 || lng < 68 || lng > 98) {
+      throw httpError(400, 'That location is not valid.');
+    }
+    await store.setEngineerLocation(id, lat, lng, now().toISOString());
+    return { ok: true };
+  }
+
   return {
     create, act, list, detail, summary, runWatcher,
     engineerJobs, engineerJob, engineerAct, engineerPhotoUpload, engineerAddPhoto,
+    engineerHistory, engineerLocation,
   };
 }
 
@@ -620,6 +645,11 @@ function supabaseStore(sb) {
       .not('status', 'in', '(closed,cancelled)').order('created_at', { ascending: true }).limit(500)),
     listClosed: (n) => one(sb.from('tickets').select('*')
       .in('status', ['closed', 'cancelled']).order('closed_at', { ascending: false }).limit(n)),
+    listClosedByEngineer: (engineerId, n) => one(sb.from('tickets').select('*').eq('engineer_id', engineerId)
+      .eq('status', 'closed').order('closed_at', { ascending: false }).limit(n)),
+    async setEngineerLocation(id, lat, lng, at) {
+      await one(sb.from('tickets').update({ eng_lat: lat, eng_lng: lng, eng_loc_at: at }).eq('id', id));
+    },
     listByCustomer: (customerId, n) => one(sb.from('tickets').select('*').eq('customer_id', customerId)
       .order('created_at', { ascending: false }).limit(n)),
     async insertEvent(e) { await one(sb.from('ticket_events').insert([e])); },

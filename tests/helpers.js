@@ -36,6 +36,8 @@ function memStore(customers) {
     },
     async listActive() { return copy(tickets.filter(t => !['closed', 'cancelled'].includes(t.status))); },
     async listClosed() { return copy(tickets.filter(t => ['closed', 'cancelled'].includes(t.status))); },
+    async listClosedByEngineer(eid, n) { return copy(tickets.filter(t => t.engineer_id === eid && t.status === 'closed').slice().reverse().slice(0, n)); },
+    async setEngineerLocation(id, lat, lng, at) { const t = tickets.find(x => x.id === id); Object.assign(t, { eng_lat: lat, eng_lng: lng, eng_loc_at: at }); },
     async listByCustomer(cid, n) { return copy(tickets.filter(t => t.customer_id === cid).slice().reverse().slice(0, n)); },
     async insertEvent(e) { events.push({ id: ++ev, at: new Date().toISOString(), ...copy(e) }); },
     async listEvents(id) { return copy(events.filter(e => e.ticket_id === id)); },

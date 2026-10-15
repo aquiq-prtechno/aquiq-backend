@@ -441,7 +441,15 @@ function createReportService(store, tickets, { now = () => new Date(), mailer, f
     return { email_status: out.email_status, email_error: out.email_error };
   }
 
-  return { form, submit, adminView, adminResend, OPTIONS, OVERRIDE_REASONS };
+  // an engineer opens the PDF of a job they finished
+  async function engineerPdf(eng, id) {
+    const t = await mine(eng, id);
+    const r = await store.getReportByTicket(t.id);
+    if (!r || !r.pdf_path) throw httpError(404, 'The service report is not ready yet.');
+    return { report_no: r.report_no, pdf_url: await store.signedReadUrl(REPORT_BUCKET, r.pdf_path, 600) };
+  }
+
+  return { form, submit, adminView, adminResend, engineerPdf, OPTIONS, OVERRIDE_REASONS };
 }
 
 // ── Supabase-backed store ────────────────────────────────────────────────────

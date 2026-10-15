@@ -82,6 +82,8 @@ function createEngineerApiRouter({ tickets, store, auth, accounts, reports }) {
     return { ok: true };
   }));
 
+  router.get('/history', guard(), wrap(async (req) => ({ jobs: await tickets.engineerHistory(req.engineer) })));
+  router.post('/jobs/:id/location', guard(), wrap((req) => tickets.engineerLocation(req.engineer, req.params.id, req.body || {})));
   router.get('/jobs', guard(), wrap((req) => tickets.engineerJobs(req.engineer)));
   router.get('/jobs/:id', guard(), wrap(async (req) => ({ job: await tickets.engineerJob(req.engineer, req.params.id) })));
   router.post('/jobs/:id/action', guard(), wrap(async (req) => {
@@ -94,6 +96,7 @@ function createEngineerApiRouter({ tickets, store, auth, accounts, reports }) {
   // service report: the form (with the unit's readings filled in) and filing it
   if (reports) {
     router.get('/jobs/:id/report', guard(), wrap((req) => reports.form(req.engineer, req.params.id)));
+    router.get('/jobs/:id/report-pdf', guard(), wrap((req) => reports.engineerPdf(req.engineer, req.params.id)));
     router.post('/jobs/:id/report', guard(), wrap((req) => reports.submit(req.engineer, req.params.id, req.body || {})));
   }
 
