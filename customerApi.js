@@ -52,6 +52,7 @@ function createCustomerService(store, tickets, { now = () => new Date() } = {}) 
     if (now().getTime() - new Date(t.eng_loc_at).getTime() > LOCATION_FRESH_MS) return null;
     const out = { lat: Number(t.eng_lat), lng: Number(t.eng_lng), updated_at: t.eng_loc_at };
     if (t.latitude != null && t.longitude != null) {
+      out.site = { lat: Number(t.latitude), lng: Number(t.longitude) };   // the customer's own site
       const straight = km({ lat: out.lat, lng: out.lng }, { lat: Number(t.latitude), lng: Number(t.longitude) });
       out.distance_km = Math.round(straight * ROAD_FACTOR * 10) / 10;
       out.eta_minutes = Math.max(1, Math.round((out.distance_km / AVG_KMH) * 60));

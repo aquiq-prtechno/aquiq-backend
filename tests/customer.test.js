@@ -140,6 +140,7 @@ const ASK = { store_id: CUST, phone: '99999 00000', issue_category: 'Low or no w
     const loc = (await w.cs.list(ASK)).tickets[0].engineer_location;
     assert.ok(loc.distance_km > 5 && loc.distance_km < 30, `distance ${loc.distance_km}`);
     assert.ok(loc.eta_minutes >= 5 && loc.eta_minutes <= 90);
+    assert.strictEqual(typeof loc.site.lat, 'number');
     w.c.add(15 * 60);                                                                     // stale after 10 minutes
     assert.strictEqual((await w.cs.list(ASK)).tickets[0].engineer_location, null);
     await w.ts.engineerAct(e, o.ticket.id, { action: 'arrive' });
