@@ -16,6 +16,7 @@ const { CATEGORIES, STATUS_LABELS, TERMINAL } = require('./tickets');
 const REPORT_BUCKET = 'service-reports';
 const fileLinks = require('./fileLinks');
 const visitLog = require('./visitLog');
+const { createAskService } = require('./askBrain');
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_PER_DAY = 5;
@@ -36,7 +37,8 @@ const LOCATION_FRESH_MS = 10 * 60 * 1000;
 const ROAD_FACTOR = 1.4;       // straight line -> typical road distance
 const AVG_KMH = 28;            // average city speed for a two-wheeler
 
-function createCustomerService(store, tickets, { now = () => new Date(), reports = null } = {}) {
+function createCustomerService(store, tickets, { now = () => new Date(), reports = null, ask = null } = {}) {
+  const brain = ask || createAskService({ now });
   async function who(input) {
     const id = String(input.store_id || '');
     const phone = digits(input.phone);
@@ -200,7 +202,20 @@ function createCustomerService(store, tickets, { now = () => new Date(), reports
       : { buffer: await visitLog.buildXlsx(args), type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', name: 'AQUIQ-visit-log.xlsx' };
   }
 
-  return { request, list, approve, notSatisfied, report, rate, visits, exportLink, buildExport };
+  // Ask AQUIQ: questions about the service system, the visit log and the open request
+  async function askQuestion(input) {
+    const c = await who(input);
+    const question = clean(input.question, 600);
+    if (question.length < 2) throw httpError(400, 'Please type your question.');
+    const rows = await visitRows(c);
+    const recent = await store.listByCustomer(c.id, 5);
+    const open = recent.find(t => !TERMINAL.includes(t.status));
+    const active = open ? view(open) : null;
+    const out = await brain.answer({ storeId: c.id, question, history: input.history, store: c, rows, active });
+    return { answer: out.answer, mode: out.mode };
+  }
+
+  return { request, list, approve, notSatisfied, report, rate, visits, exportLink, buildExport, ask: askQuestion };
 }
 
 function createCustomerRouter(service) {
@@ -218,6 +233,7 @@ function createCustomerRouter(service) {
   router.post('/service-request/not-satisfied', wrap((req) => service.notSatisfied(req.body || {})));
   router.post('/service-request/report', wrap((req) => service.report(req.body || {})));
   router.post('/service-request/rate', wrap((req) => service.rate(req.body || {})));
+  router.post('/ask', wrap((req) => service.ask(req.body || {})));
   router.post('/visit-log', wrap((req) => service.visits(req.body || {})));
   router.post('/visit-log/export', wrap((req) => service.exportLink(req.body || {})));
   return router;
