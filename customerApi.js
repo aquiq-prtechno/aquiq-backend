@@ -64,7 +64,8 @@ function createCustomerService(store, tickets, { now = () => new Date() } = {}) 
     return {
       id: t.id, ticket_no: t.ticket_no, status: t.status, status_label: STATUS_LABELS[t.status] || t.status,
       issue_category: t.issue_category, description: t.description, created_at: t.created_at,
-      engineer_name: ['accepted', 'arrived', 'work_done', 'approved', 'reopened'].includes(t.status) ? t.engineer_name : null,
+      engineer_name: ['accepted', 'arrived', 'work_done', 'approved', 'reopened', 'closed'].includes(t.status) ? t.engineer_name : null,
+      closed_at: t.closed_at || null,
       eta_at: t.status === 'accepted' ? t.eta_at : null,
       active: !TERMINAL.includes(t.status),
       can_respond: t.status === 'work_done',          // the customer may approve or say not satisfied
@@ -100,7 +101,7 @@ function createCustomerService(store, tickets, { now = () => new Date() } = {}) 
 
   async function list(input) {
     const c = await who(input);
-    const rows = await store.listByCustomer(c.id, 10);
+    const rows = await store.listByCustomer(c.id, 30);
     const out = [];
     for (const t of rows) {
       const v = view(t);
