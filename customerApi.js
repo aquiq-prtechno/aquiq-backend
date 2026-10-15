@@ -14,6 +14,8 @@
 const express = require('express');
 const { CATEGORIES, STATUS_LABELS, TERMINAL } = require('./tickets');
 const REPORT_BUCKET = 'service-reports';
+const fileLinks = require('./fileLinks');
+const visitLog = require('./visitLog');
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_PER_DAY = 5;
@@ -34,7 +36,7 @@ const LOCATION_FRESH_MS = 10 * 60 * 1000;
 const ROAD_FACTOR = 1.4;       // straight line -> typical road distance
 const AVG_KMH = 28;            // average city speed for a two-wheeler
 
-function createCustomerService(store, tickets, { now = () => new Date() } = {}) {
+function createCustomerService(store, tickets, { now = () => new Date(), reports = null } = {}) {
   async function who(input) {
     const id = String(input.store_id || '');
     const phone = digits(input.phone);
@@ -143,12 +145,48 @@ function createCustomerService(store, tickets, { now = () => new Date() } = {}) 
   async function report(input) {
     const c = await who(input);
     const t = await ownTicket(c, input.ticket_id);
+    if (reports) {
+      const l = await reports.linkFor(t.id);
+      if (!l) throw httpError(404, 'The service report is not ready yet.');
+      return { report_no: l.report_no, pdf_url: l.pdf_url };
+    }
     const r = await store.getReportByTicket(t.id);
     if (!r || !r.pdf_path) throw httpError(404, 'The service report is not ready yet.');
     return { report_no: r.report_no, pdf_url: await store.signedReadUrl(REPORT_BUCKET, r.pdf_path, 600) };
   }
 
-  return { request, list, approve, notSatisfied, report };
+  // every finished AQUIQ service and every visit the customer logged, one line each
+  async function visitRows(c) {
+    const tix = await store.listByCustomer(c.id, 1000);
+    const manual = store.listServiceHistory ? await store.listServiceHistory(c.device_id || c.id).catch(() => []) : [];
+    return visitLog.rowsFrom(tix, manual);
+  }
+
+  async function visits(input) {
+    const c = await who(input);
+    const rows = await visitRows(c);
+    return { visits: rows.map(r => ({ ...r, has_report: r.kind === 'aquiq' })) };
+  }
+
+  // a short-lived link; the file is built fresh when it is opened
+  async function exportLink(input) {
+    const c = await who(input);
+    const fmt = input.format === 'pdf' ? 'pdf' : 'xlsx';
+    const token = fileLinks.sign({ k: 'visitlog', cid: c.id, fmt }, 600);
+    return { url: `${fileLinks.baseUrl()}/files/visit-log/${token}`, format: fmt };
+  }
+
+  async function buildExport(customerId, fmt) {
+    const c = await store.getCustomer(customerId);
+    if (!c) throw httpError(404, 'Store not found.');
+    const rows = await visitRows(c);
+    const args = { storeName: c.name, rows, generatedAt: now() };
+    return fmt === 'pdf'
+      ? { buffer: await visitLog.buildPdf(args), type: 'application/pdf', name: 'AQUIQ-visit-log.pdf' }
+      : { buffer: await visitLog.buildXlsx(args), type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', name: 'AQUIQ-visit-log.xlsx' };
+  }
+
+  return { request, list, approve, notSatisfied, report, visits, exportLink, buildExport };
 }
 
 function createCustomerRouter(service) {
@@ -165,7 +203,34 @@ function createCustomerRouter(service) {
   router.post('/service-request/approve', wrap((req) => service.approve(req.body || {})));
   router.post('/service-request/not-satisfied', wrap((req) => service.notSatisfied(req.body || {})));
   router.post('/service-request/report', wrap((req) => service.report(req.body || {})));
+  router.post('/visit-log', wrap((req) => service.visits(req.body || {})));
+  router.post('/visit-log/export', wrap((req) => service.exportLink(req.body || {})));
   return router;
 }
 
-module.exports = { createCustomerService, createCustomerRouter };
+// Public, token-protected downloads for files that are built on request.
+function createFilesRouter({ customerService, reportService }) {
+  const router = express.Router();
+  const fail = (res, status, msg) => res.status(status).type('text/plain').send(msg);
+  router.get('/report/:token', async (req, res) => {
+    const p = fileLinks.verify(req.params.token);
+    if (!p || p.k !== 'report') return fail(res, 410, 'This link has expired. Please open the report again from the app.');
+    try {
+      const pdf = await reportService.renderStored(p.tid);
+      res.set({ 'Content-Type': 'application/pdf', 'Content-Disposition': 'inline; filename="AQUIQ-service-report.pdf"', 'Cache-Control': 'no-store' });
+      res.send(pdf);
+    } catch (e) { console.error('[FILES] report', e.message); fail(res, e.status || 500, 'The report could not be prepared.'); }
+  });
+  router.get('/visit-log/:token', async (req, res) => {
+    const p = fileLinks.verify(req.params.token);
+    if (!p || p.k !== 'visitlog') return fail(res, 410, 'This link has expired. Please download again from the app.');
+    try {
+      const f = await customerService.buildExport(p.cid, p.fmt);
+      res.set({ 'Content-Type': f.type, 'Content-Disposition': `attachment; filename="${f.name}"`, 'Cache-Control': 'no-store' });
+      res.send(f.buffer);
+    } catch (e) { console.error('[FILES] visit log', e.message); fail(res, e.status || 500, 'The file could not be prepared.'); }
+  });
+  return router;
+}
+
+module.exports = { createCustomerService, createCustomerRouter, createFilesRouter };

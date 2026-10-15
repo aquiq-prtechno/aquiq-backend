@@ -1216,7 +1216,18 @@ app.use('/admin/service-reports', require('./reports').createReportsAdminRouter(
 
 // Customer app: "Request service". Not under /admin: it checks the store id + registered mobile itself.
 const customerApi = require('./customerApi');
-app.use('/customer', customerApi.createCustomerRouter(customerApi.createCustomerService(serviceStore, ticketService)));
+const customerService = customerApi.createCustomerService(serviceStore, ticketService, { reports: reportService });
+app.use('/customer', customerApi.createCustomerRouter(customerService));
+app.use('/files', customerApi.createFilesRouter({ customerService, reportService }));
+
+// Every night: photos, videos and report PDFs older than 12 months are removed (details stay).
+const { runRetention } = require('./retention');
+cron.schedule('30 21 * * *', async () => {            // 03:00 IST
+  try {
+    const out = await runRetention(serviceStore);
+    if (out.purged) console.log(`[RETENTION] removed media + PDF of ${out.purged} report(s)`);
+  } catch (err) { console.error('[RETENTION]', err.message); }
+});
 
 // The engineer app (AQUIQ SE-TECH). Not under /admin: it has its own sign-in rules.
 const engineerApi = require('./engineerApi');

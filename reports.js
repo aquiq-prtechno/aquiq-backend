@@ -12,6 +12,8 @@
 
 const express = require('express');
 const { istParts, snapshotOf, mediaOf, PHOTO_BUCKET, ONLINE_WINDOW_MS } = require('./tickets');
+const { logo, stampFooters, LETTERHEAD } = require('./letterhead');
+const fileLinks = require('./fileLinks');
 
 const REPORT_BUCKET = 'service-reports';
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -111,8 +113,10 @@ function renderPdf(report, images) {
     doc.on('error', reject);
     const W = doc.page.width - 80;
 
-    doc.fillColor(AMBER).font('Helvetica-Bold').fontSize(20).text('PR TECHNO  WMS', 40, 40);
-    doc.fillColor(INK).fontSize(26).text('SERVICE REPORT', 40, 66);
+    const lg = logo();
+    if (lg) { try { doc.image(lg, 40, 32, { fit: [58, 58] }); } catch { /* logo is optional */ } }
+    doc.fillColor(AMBER).font('Helvetica-Bold').fontSize(18).text('AQUIQ  by PR TECHNO', 108, 38);
+    doc.fillColor(INK).fontSize(24).text('SERVICE REPORT', 108, 62);
     doc.fillColor(MUTED).font('Helvetica').fontSize(10)
       .text(`FSR No: ${report.report_no}`, 40, 44, { width: W, align: 'right' })
       .text(`Ticket: ${report.ticket_no}`, 40, 58, { width: W, align: 'right' })
@@ -157,6 +161,12 @@ function renderPdf(report, images) {
       doc.fillColor(INK).font('Helvetica-Bold').fontSize(10.5).text(String(v || '—'), 215, y + 6, { width: W - 190 });
       y += h;
     });
+    if (report.photos_removed) {
+      doc.fillColor(MUTED).font('Helvetica-Oblique').fontSize(9).text(
+        'Photos and videos of this service were removed from our servers 12 months after the report was saved. All report details above are unchanged.',
+        40, y + 6, { width: W });
+      y = doc.y + 8;
+    }
     if (dr.captured_at) {
       doc.fillColor(MUTED).font('Helvetica').fontSize(8.5).text(
         `Device readings captured ${istStamp(new Date(dr.captured_at))}${dr.stale ? ' – the unit was offline at that time, so values may be old or unavailable' : ''}. AQUIQ test.`,
@@ -197,16 +207,8 @@ function renderPdf(report, images) {
       .text(`Report filed: ${report.when_label} (India time)`);
     doc.moveDown(2).font('Helvetica-Bold').text('Customer approval', 40, doc.y);
     doc.font('Helvetica').text(report.approval_label, 40, doc.y + 6, { width: W });
-    doc.fillColor(MUTED).fontSize(9).text('PR TECHNO  |  AQUIQ Water Monitoring', 40, 780, { width: W, align: 'center' });
-    // stamp on every page: report number on the left, India date and time on the right
-    const range = doc.bufferedPageRange();
-    const stamp = report.stamp_at ? stampText(new Date(report.stamp_at)) : '';
-    for (let i = range.start; i < range.start + range.count; i++) {
-      doc.switchToPage(i);
-      doc.fillColor(INK).font('Helvetica').fontSize(8.5)
-        .text(report.report_no, 40, 16, { width: W / 2, lineBreak: false })
-        .text(stamp, 40 + W / 2, 16, { width: W / 2, align: 'right', lineBreak: false });
-    }
+    // report number + India date/time at the top of every page, letterhead at the bottom
+    stampFooters(doc, report.stamp_at ? stampText(new Date(report.stamp_at)) : '', report.report_no);
     doc.end();
   });
 }
@@ -429,7 +431,8 @@ function createReportService(store, tickets, { now = () => new Date(), mailer, f
         approval_mode: r.approval_mode, override_reason: r.override_reason,
         email_status: r.email_status, email_to: r.email_to, email_error: r.email_error,
         data: r.data, device_readings: r.device_readings,
-        pdf_url: r.pdf_path ? await store.signedReadUrl(REPORT_BUCKET, r.pdf_path, 600) : null,
+        pdf_url: (await linkFor(ticketId)).pdf_url,
+        media_purged_at: r.media_purged_at || null,
         ticket_no: t && t.ticket_no,
       },
     };
@@ -440,21 +443,54 @@ function createReportService(store, tickets, { now = () => new Date(), mailer, f
     if (!r) throw httpError(404, 'No service report for this ticket yet.');
     if (!mail.enabled) throw httpError(503, 'Email is not set up yet.');
     const t = await store.getTicket(ticketId);
-    const url = await store.signedReadUrl(REPORT_BUCKET, r.pdf_path, 120);
-    const pdf = await fetchBytes(url);
+    const pdf = (r.pdf_path && !r.pdf_purged_at)
+      ? await fetchBytes(await store.signedReadUrl(REPORT_BUCKET, r.pdf_path, 120))
+      : await renderStored(ticketId);
     const out = await sendEmail(r, t, pdf, { engineer_name: '' });
     return { email_status: out.email_status, email_error: out.email_error };
+  }
+
+  // The PDF is kept for 12 months. After that it is rebuilt from the saved details when asked.
+  async function linkFor(ticketId) {
+    const r = await store.getReportByTicket(ticketId);
+    if (!r) return null;
+    if (r.pdf_path && !r.pdf_purged_at) {
+      return { report_no: r.report_no, pdf_url: await store.signedReadUrl(REPORT_BUCKET, r.pdf_path, 600), rebuilt: false };
+    }
+    const token = fileLinks.sign({ k: 'report', tid: ticketId }, 600);
+    return { report_no: r.report_no, pdf_url: `${fileLinks.baseUrl()}/files/report/${token}`, rebuilt: true };
+  }
+
+  async function renderStored(ticketId) {
+    const r = await store.getReportByTicket(ticketId);
+    if (!r) throw httpError(404, 'No service report for this ticket.');
+    const t = await store.getTicket(ticketId);
+    const d = r.data || {};
+    const at = new Date(r.created_at);
+    const approvalLabel = r.approval_mode === 'customer' ? 'Approved by the customer in the AQUIQ app.'
+      : r.approval_mode === 'admin' ? 'Approved on the customer’s behalf by AQUIQ.'
+      : `Filed WITHOUT customer approval. Reason: ${r.override_reason}`;
+    const full = {
+      report_no: r.report_no, ticket_no: t.ticket_no, service_name: r.service_name, when_label: istStamp(at),
+      stamp_at: at.toISOString(), location: [t.address, t.pincode].filter(Boolean).join(' – ') || null,
+      admin_name: t.contact_person || null, site_place: t.site_name || t.address || null,
+      data: d, device_readings: r.device_readings || {}, approval_mode: r.approval_mode, override_reason: r.override_reason,
+      approval_label: approvalLabel, engineer_name: d.engineer_name || t.engineer_name || '—',
+      engineer_code: d.engineer_code || '', engineer_designation: d.engineer_designation || null,
+      videos: [], photos_removed: !!r.media_purged_at,
+    };
+    return renderPdf(full, []);
   }
 
   // an engineer opens the PDF of a job they finished
   async function engineerPdf(eng, id) {
     const t = await mine(eng, id);
-    const r = await store.getReportByTicket(t.id);
-    if (!r || !r.pdf_path) throw httpError(404, 'The service report is not ready yet.');
-    return { report_no: r.report_no, pdf_url: await store.signedReadUrl(REPORT_BUCKET, r.pdf_path, 600) };
+    const l = await linkFor(t.id);
+    if (!l) throw httpError(404, 'The service report is not ready yet.');
+    return { report_no: l.report_no, pdf_url: l.pdf_url };
   }
 
-  return { form, submit, adminView, adminResend, engineerPdf, OPTIONS, OVERRIDE_REASONS };
+  return { form, submit, adminView, adminResend, engineerPdf, linkFor, renderStored, OPTIONS, OVERRIDE_REASONS };
 }
 
 // ── Supabase-backed store ────────────────────────────────────────────────────
@@ -475,6 +511,18 @@ function supabaseReportStore(sb) {
     insertReport: (row) => one(sb.from('service_reports').insert([row]).select().single()),
     updateReport: (id, patch) => one(sb.from('service_reports').update(patch).eq('id', id)),
     deleteReport: (id) => one(sb.from('service_reports').delete().eq('id', id)),
+    // reports old enough that their photos, videos and PDF are due to be removed
+    listReportsDue: (cutoffIso, n) => one(sb.from('service_reports').select('*')
+      .lt('created_at', cutoffIso).is('media_purged_at', null).order('created_at', { ascending: true }).limit(n)),
+    async deleteObjects(bucket, paths) {
+      if (!paths.length) return;
+      const { error } = await sb.storage.from(bucket).remove(paths);
+      if (error) { const e = httpError(500, 'Could not remove stored files.'); e.detail = error.message; throw e; }
+    },
+    deletePhotoRows: (ticketId) => one(sb.from('ticket_photos').delete().eq('ticket_id', ticketId)),
+    // the customer's own manually logged visits
+    listServiceHistory: (deviceId) => one(sb.from('service_history').select('*').eq('device_id', deviceId)
+      .order('visit_date', { ascending: false }).limit(1000)),
     async uploadObject(bucket, path, buffer, contentType) {
       const { error } = await sb.storage.from(bucket).upload(path, buffer, { contentType, upsert: true });
       if (error) { const e = httpError(500, 'Could not store the report file.'); e.detail = error.message; throw e; }

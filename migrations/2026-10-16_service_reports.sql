@@ -50,3 +50,7 @@ alter table engineers add column if not exists designation text;
 alter table tickets add column if not exists eng_lat double precision;
 alter table tickets add column if not exists eng_lng double precision;
 alter table tickets add column if not exists eng_loc_at timestamptz;
+
+-- 7) 12-month clean-up: remember when a report's photos/videos and PDF were removed.
+alter table service_reports add column if not exists media_purged_at timestamptz;
+alter table service_reports add column if not exists pdf_purged_at timestamptz;
