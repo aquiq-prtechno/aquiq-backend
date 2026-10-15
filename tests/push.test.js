@@ -38,7 +38,7 @@ const TOKEN = (n) => `ExponentPushToken[token-number-${n}]`;
     assert.strictEqual(sent[0].to, TOKEN(1));
     assert.match(sent[0].title, /URGENT/);
     assert.strictEqual(sent[0].sound, 'aquiq_ring.wav');
-    assert.strictEqual(sent[0].channelId, 'complaints_v2');
+    assert.strictEqual(sent[0].channelId, 'complaints_v3');
     assert.strictEqual(sent[0].data.ticket_no, t.ticket_no);
   });
 

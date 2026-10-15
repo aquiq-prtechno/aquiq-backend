@@ -7,7 +7,7 @@
 // customer's name, phone or address.
 
 const EXPO_URL = 'https://exp.host/--/api/v2/push/send';
-const CHANNEL = 'complaints_v2';           // must match the channel created by the app
+const CHANNEL = 'complaints_v3';           // must match the channel created by the app
 const SOUND = 'aquiq_ring.wav';            // AQUIQ alert sound bundled in the engineer app
 
 function createPushService(store, { send, enabled = true, log = console } = {}) {
