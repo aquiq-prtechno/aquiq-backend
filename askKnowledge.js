@@ -45,8 +45,8 @@ const KNOWLEDGE = [
   },
   {
     id: 'contact', title: 'Changing your email or mobile number',
-    keywords: ['change email', 'add email', 'my email', 'email id', 'change mobile', 'change number', 'change phone', 'mobile number', 'update email', 'which email', 'email address', 'contact details', 'profile'],
-    text: 'Stores: open Settings in the app, find "Contact details", tap "Add email" (or "Change email"), type your email and enter the 6-digit code we send to confirm it is yours. Service updates and reports then go to that email. If a store has no email of its own, they go to the company account\'s email. Company accounts: tap the 👤 icon on the home screen to add or change the email, or to change the mobile number (the code goes to your confirmed email). Stores log in with their registered mobile number.',
+    keywords: ['change email', 'add email', 'my email', 'email id', 'change mobile', 'change number', 'change phone', 'mobile number', 'update email', 'which email', 'email address', 'contact details', 'profile', 'login with email', 'email login', 'log in with email', 'login'],
+    text: 'Stores: open Settings in the app, find "Contact details", tap "Add email" (or "Change email"), type your email and enter the 6-digit code we send to confirm it is yours. Service updates and reports then go to that email. If a store has no email of its own, they go to the company account\'s email. Company accounts: tap the 👤 icon on the home screen to add or change the email, or to change the mobile number (the code goes to your confirmed email). Stores log in with their registered mobile number, or with their confirmed email: tap "Log in with email instead" on the store login screen and enter the 6-digit code sent to that email.',
   },
   {
     id: 'rating', title: 'Rating a service',

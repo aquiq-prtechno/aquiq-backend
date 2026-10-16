@@ -94,7 +94,44 @@ function createContactService(store, mailer, { now = () => new Date() } = {}) {
     return { ok: true, phone: p.value };
   }
 
-  return { current, requestCode, confirm };
+  // ── store login with a verified email: a 6-digit code replaces typing a password ──
+  async function loginCode(input) {
+    const email = String(input.email || '').trim().toLowerCase();
+    if (!EMAIL_RE.test(email)) throw httpError(400, 'Enter a valid email address.');
+    throttle(email, 5, 'login');
+    if (!mailer || !mailer.enabled) throw httpError(503, 'Email login is not available yet. Please use your mobile number.');
+    const stores = await store.findStoresByVerifiedEmail(email);
+    const code = String(crypto.randomInt(100000, 1000000));
+    const token = fileLinks.sign({ k: 'login', email }, 600, now().getTime());
+    // same answer whether or not the email is registered, so nobody can probe which emails exist
+    if (stores.length) {
+      await mailer.send({
+        to: email, subject: 'Your AQUIQ login code',
+        text: `Your AQUIQ login code is ${code}.\n\nIt works for 10 minutes. If you did not try to log in, you can ignore this email.\n\nAQUIQ Service Desk`,
+      });
+    }
+    return { token: `${token}.${hash(code, token)}`, sent_to: email.replace(/^(.).*(@.*)$/, '$1***$2') };
+  }
+
+  async function loginConfirm(input) {
+    const email = String(input.email || '').trim().toLowerCase();
+    const parts = String(input.token || '').split('.');
+    const bad = () => httpError(400, 'That code is not correct or has expired.');
+    if (parts.length !== 3) throw bad();
+    const signed = `${parts[0]}.${parts[1]}`;
+    const p = fileLinks.verify(signed, now().getTime());
+    if (!p || p.k !== 'login' || p.email !== email) throw bad();
+    const want = hash(String(input.code || '').trim(), signed);
+    if (parts[2].length !== want.length || !crypto.timingSafeEqual(Buffer.from(parts[2]), Buffer.from(want))) {
+      throttle(email, 8, 'loginwrong');
+      throw bad();
+    }
+    const stores = await store.findStoresByVerifiedEmail(email);
+    if (!stores.length) throw bad();
+    return { stores };
+  }
+
+  return { current, requestCode, confirm, loginCode, loginConfirm };
 }
 
 function createContactRouter(service) {
@@ -109,6 +146,8 @@ function createContactRouter(service) {
   router.post('/current', wrap((req) => service.current(req.body || {})));
   router.post('/code', wrap((req) => service.requestCode(req.body || {})));
   router.post('/confirm', wrap((req) => service.confirm(req.body || {})));
+  router.post('/login/code', wrap((req) => service.loginCode(req.body || {})));
+  router.post('/login/confirm', wrap((req) => service.loginConfirm(req.body || {})));
   return router;
 }
 
@@ -118,6 +157,9 @@ function supabaseContactStore(sb) {
     getUhad: (id) => one(sb.from('uhads').select('id,name,phone,email').eq('id', id).maybeSingle()),
     getCustomer: (id) => one(sb.from('customers').select('id,name,phone,email,uhad_id').eq('id', id).maybeSingle()),
     findUhadByEmail: (email) => one(sb.from('uhads').select('id').eq('email', email).maybeSingle()),
+    // stores whose own email was confirmed with a code: the only ones allowed to log in by email
+    findStoresByVerifiedEmail: (email) => one(sb.from('customers').select('*, uhads(id, name, company, email)')
+      .eq('role', 'uhsa').eq('email', email).not('email_verified_at', 'is', null)),
     async setStoreEmail(id, email) { await one(sb.from('customers').update({ email, email_verified_at: new Date().toISOString() }).eq('id', id)); },
     async setUhadEmail(id, email) { await one(sb.from('uhads').update({ email }).eq('id', id)); },
     async setUhadPhone(id, phone) { await one(sb.from('uhads').update({ phone }).eq('id', id)); },

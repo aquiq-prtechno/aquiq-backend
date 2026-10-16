@@ -25,6 +25,7 @@ function world({ uhadEmail = null, enabled = true } = {}) {
     setStoreEmail: async (id, e) => { db.stores[id].email = e; },
     setUhadEmail: async (id, e) => { db.uhads[id].email = e; },
     setUhadPhone: async (id, p) => { db.uhads[id].phone = p; },
+    findStoresByVerifiedEmail: async (e) => Object.values(db.stores).filter(x => x.email === e && x.verified),
   };
   const sent = [];
   const mailer = { enabled, send: async (m) => sent.push(m) };
@@ -113,6 +114,37 @@ const U = { kind: 'uhad', id: UHAD, phone: '8888800000' };
     assert.strictEqual(s1.running, 1); assert.strictEqual(s2.running, 0); assert.strictEqual(s2.status, 'Active' === s2.status ? 'x' : 'Removed');
     const np = await svc.newPassword(UHAD, 'admin');
     assert.match(np.password, /^[A-Za-z0-9]{10}$/); assert.strictEqual(store.last, np.password);
+  });
+
+  await test('a store logs in with a verified email and a 6-digit code', async () => {
+    const w = world();
+    w.db.stores[STORE].email = 'hotel@saffron.test'; w.db.stores[STORE].verified = true;
+    const r = await w.svc.loginCode({ email: 'Hotel@Saffron.test' });
+    assert.strictEqual(w.sent.length, 1); assert.match(w.sent[0].subject, /login code/);
+    await ok400(w.svc.loginConfirm({ email: 'hotel@saffron.test', token: r.token, code: '123456' }), 400, /not correct/);
+    const out = await w.svc.loginConfirm({ email: 'hotel@saffron.test', token: r.token, code: codeOf(w.sent[0]) });
+    assert.strictEqual(out.stores.length, 1); assert.strictEqual(out.stores[0].id, STORE);
+    await ok400(w.svc.loginConfirm({ email: 'other@x.test', token: r.token, code: codeOf(w.sent[0]) }), 400);
+    w.c.add(11 * 60);
+    await ok400(w.svc.loginConfirm({ email: 'hotel@saffron.test', token: r.token, code: codeOf(w.sent[0]) }), 400, /expired/);
+  });
+
+  await test('login by email: an unknown or unconfirmed email gets the same answer and no email is sent', async () => {
+    const w = world();
+    w.db.stores[STORE].email = 'unconfirmed@x.test';          // not verified
+    const a = await w.svc.loginCode({ email: 'nobody@x.test' });
+    const b = await w.svc.loginCode({ email: 'unconfirmed@x.test' });
+    assert.strictEqual(w.sent.length, 0);
+    assert.ok(a.token && b.token);
+    await ok400(w.svc.loginConfirm({ email: 'nobody@x.test', token: a.token, code: '000000' }), 400);
+  });
+
+  await test('login codes cannot be brute-forced', async () => {
+    const w = world();
+    w.db.stores[STORE].email = 'h@x.test'; w.db.stores[STORE].verified = true;
+    const r = await w.svc.loginCode({ email: 'h@x.test' });
+    for (let i = 0; i < 8; i++) await ok400(w.svc.loginConfirm({ email: 'h@x.test', token: r.token, code: String(111110 + i) }), 400);
+    await ok400(w.svc.loginConfirm({ email: 'h@x.test', token: r.token, code: '999999' }), 429);
   });
 
   for (const [s, n] of results) console.log(`${s}  ${n}`);
