@@ -40,7 +40,7 @@ const KNOWLEDGE = [
   },
   {
     id: 'emails', title: 'Emails you receive',
-    keywords: ['email', 'mail', 'emails', 'notification', 'notify', 'inform', 'update me', 'inbox'],
+    keywords: ['email', 'mail', 'emails', 'notification', 'notify', 'inform', 'update me', 'inbox', 'get an email', 'get email', 'send email', 'email me', 'mail me', 'by email', 'on email'],
     text: 'AQUIQ emails you at each step, to the email your AQUIQ account is registered with: when your request is received (with your ticket number), when an engineer is assigned (with their name and expected time), if the engineer is running late, when the work is finished and needs your approval, if you say you are not satisfied and the job is reopened, and finally with the service report PDF when the service is complete. You can also follow everything live in the app.',
   },
   {
