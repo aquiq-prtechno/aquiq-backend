@@ -231,12 +231,12 @@ function createMailer(env = process.env, http = require('axios')) {
   let transport = null;
   const list = (v) => (v == null ? [] : Array.isArray(v) ? v : [v]);
 
-  async function send({ to, cc, subject, text, attachments }) {
+  async function send({ to, cc, subject, text, html, attachments }) {
     if (!enabled) throw httpError(503, 'Mail is not set up.');
     if (provider === 'relay') {
       // hand the message to the AQUIQ mail relay over HTTPS (it sends through Gmail)
       await http.post(env.MAIL_RELAY_URL, {
-        to: list(to), ...(list(cc).length ? { cc: list(cc) } : {}), subject, text,
+        to: list(to), ...(list(cc).length ? { cc: list(cc) } : {}), subject, text, ...(html ? { html } : {}),
         ...(attachments && attachments.length ? { attachments: attachments.map(a => ({ filename: a.filename, content: Buffer.from(a.content).toString('base64') })) } : {}),
       }, { headers: { Authorization: `Bearer ${env.MAIL_RELAY_SECRET}`, 'content-type': 'application/json' }, timeout: 25000, maxBodyLength: 6 * 1024 * 1024 });
       return;
@@ -246,14 +246,14 @@ function createMailer(env = process.env, http = require('axios')) {
         sender: { name: fromName, email: fromAddr },
         to: list(to).map(email => ({ email })),
         ...(list(cc).length ? { cc: list(cc).map(email => ({ email })) } : {}),
-        subject, textContent: text,
+        subject, textContent: text, ...(html ? { htmlContent: html } : {}),
         ...(attachments && attachments.length ? { attachment: attachments.map(a => ({ name: a.filename, content: Buffer.from(a.content).toString('base64') })) } : {}),
       }, { headers: { 'api-key': env.BREVO_API_KEY, 'content-type': 'application/json' }, timeout: 20000 });
       return;
     }
     if (provider === 'resend') {
       await http.post('https://api.resend.com/emails', {
-        from: `${fromName} <${fromAddr}>`, to: list(to), ...(list(cc).length ? { cc: list(cc) } : {}), subject, text,
+        from: `${fromName} <${fromAddr}>`, to: list(to), ...(list(cc).length ? { cc: list(cc) } : {}), subject, text, ...(html ? { html } : {}),
         ...(attachments && attachments.length ? { attachments: attachments.map(a => ({ filename: a.filename, content: Buffer.from(a.content).toString('base64') })) } : {}),
       }, { headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, 'content-type': 'application/json' }, timeout: 20000 });
       return;
@@ -267,7 +267,7 @@ function createMailer(env = process.env, http = require('axios')) {
         connectionTimeout: 15000, greetingTimeout: 15000, socketTimeout: 20000,
       });
     }
-    await transport.sendMail({ from: `"${fromName}" <${fromAddr}>`, to, cc, subject, text, attachments });
+    await transport.sendMail({ from: `"${fromName}" <${fromAddr}>`, to, cc, subject, text, html, attachments });
   }
 
   return {
@@ -278,6 +278,46 @@ function createMailer(env = process.env, http = require('axios')) {
 }
 
 // ── service ──────────────────────────────────────────────────────────────────
+
+const FSR_DISCLAIMER = 'This is a system-generated Field Service Report issued by the service department and electronically authorized by the designated service personnel of the company. The report is valid without a physical signature or company stamp and is non-billable.';
+const esc = (v) => String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+// Who gave the approval for the work: the customer, AQUIQ helpdesk on their behalf, or the engineer.
+function closedByName(t, engineerName) {
+  if (t.customer_response === 'approved_by_admin') return 'AQUIQ Helpdesk';
+  if (t.customer_response === 'bypassed_by_engineer' || !t.customer_response) return engineerName ? `${engineerName} (Engineer)` : 'AQUIQ Engineer';
+  return t.contact_person || 'Customer';
+}
+
+// The service report email: plain text and styled HTML (same words).
+function buildReportMail(t, row, engineerName) {
+  const name = t.contact_person || 'Customer';
+  const closedBy = closedByName(t, engineerName);
+  const subject = `SERVICE REPORT – ${row.report_no}`;
+  const intro = 'Please find attached the Field Service Report (FSR) pertaining to our onsite service operation for the above-mentioned ticket.';
+  const help = 'Should you require any further clarification or assistance, please feel free to contact us through the designated support channels.';
+  const text = [
+    'AQUIQ', '',
+    `Ticket ID: ${t.ticket_no}`, `Service: ${row.service_name}`, '',
+    `Hey ${name},`, '', intro, '', help, '',
+    `Team: AQUIQ-FSR    Closed By: ${closedBy}`, '',
+    'Regards,', 'AQUIQ FSR-ADMIN', '',
+    '--------------------------------------------------', FSR_DISCLAIMER,
+  ].join('\n');
+  const html = `<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.6;max-width:640px">
+<p style="margin:0 0 18px;font-size:18px;font-weight:bold;letter-spacing:.5px">AQUIQ</p>
+<p style="margin:0 0 4px"><b>Ticket ID:</b> ${esc(t.ticket_no)}</p>
+<p style="margin:0 0 18px"><b>Service:</b> ${esc(row.service_name)}</p>
+<p style="margin:0 0 14px">Hey ${esc(name)},</p>
+<p style="margin:0 0 14px">${intro}</p>
+<p style="margin:0 0 18px">${help}</p>
+<p style="margin:0 0 18px"><b>Team:</b> AQUIQ-FSR &nbsp; <b>Closed By:</b> ${esc(closedBy)}</p>
+<p style="margin:0 0 4px">Regards,</p>
+<p style="margin:0 0 18px"><b>AQUIQ FSR-ADMIN</b></p>
+<div style="border-top:2px solid #2a6fb0;padding-top:10px;font-size:12px;line-height:1.5;color:#8a8f98">${FSR_DISCLAIMER}</div>
+</div>`;
+  return { subject, text, html };
+}
 
 function createReportService(store, tickets, { now = () => new Date(), mailer, fetchBytes } = {}) {
   const mail = mailer || { enabled: false, copyTo: null, send: async () => { throw httpError(503, 'Mail is not set up.'); } };
@@ -458,8 +498,7 @@ function createReportService(store, tickets, { now = () => new Date(), mailer, f
       try {
         await mail.send({
           to: to.length ? to : copy, cc: to.length && copy ? copy : undefined,
-          subject: `Service report ${row.report_no} – AQUIQ`,
-          text: `Dear ${t.contact_person || 'Customer'},\n\nYour RO service is complete. The service report ${row.report_no} for ticket ${t.ticket_no} is attached.\n\nService: ${row.service_name}\nSite: ${t.site_name || ''}\nEngineer: ${full.engineer_name}\n\nThank you,\nAQUIQ Service Desk\nPR TECHNO`,
+          ...buildReportMail(t, row, full.engineer_name || t.engineer_name),
           attachments: [{ filename: `${row.report_no}.pdf`, content: pdf, contentType: 'application/pdf' }],
         });
         status = to.length ? 'sent' : 'no_customer_email';
@@ -604,6 +643,7 @@ function createReportsAdminRouter(service) {
 }
 
 module.exports = {
+  buildReportMail,
   OPTIONS, REQUIRED, OVERRIDE_REASONS, REPORT_BUCKET,
   serviceName, reportNo, pumpCondition, deviceReadings, renderPdf, createMailer,
   createReportService, supabaseReportStore, createReportsAdminRouter,

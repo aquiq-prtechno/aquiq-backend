@@ -254,6 +254,20 @@ async function toWorkDone(w, e, t) {
     assert.ok(pdf.length > 1500);
   });
 
+  await test('report email: standard subject, AQUIQ-FSR body, closed-by name, system-generated notice, html twin', async () => {
+    const t = { ticket_no: 'PMR2611790131016', contact_person: 'Anuj Thakur', customer_response: 'approved' };
+    const m = R.buildReportMail(t, { report_no: 'FSR-PMR2611790131016', service_name: 'Pump not running – RESOLVED' }, 'Ravi');
+    assert.strictEqual(m.subject, 'SERVICE REPORT – FSR-PMR2611790131016');
+    assert.match(m.text, /^AQUIQ\n/); assert.match(m.text, /Hey Anuj Thakur,/);
+    assert.match(m.text, /Team: AQUIQ-FSR\s+Closed By: Anuj Thakur/); assert.match(m.text, /Regards,\nAQUIQ FSR-ADMIN/);
+    assert.match(m.text, /system-generated Field Service Report issued by the service department/);
+    assert.ok(!/WMS|PR TECHNO/.test(m.text + m.html));
+    assert.match(m.html, /<b>Closed By:<\/b> Anuj Thakur/);
+    assert.match(R.buildReportMail({ ...t, customer_response: 'approved_by_admin' }, { report_no: 'X', service_name: 'S' }, 'Ravi').text, /Closed By: AQUIQ Helpdesk/);
+    assert.match(R.buildReportMail({ ...t, customer_response: 'bypassed_by_engineer' }, { report_no: 'X', service_name: 'S' }, 'Ravi').text, /Closed By: Ravi \(Engineer\)/);
+    assert.match(R.buildReportMail({ ...t, contact_person: '<b>x</b>' }, { report_no: 'X', service_name: 'S' }, 'Ravi').html, /Hey &lt;b&gt;x&lt;\/b&gt;,/, 'html-escaped');
+  });
+
   for (const [s, n] of results) console.log(`${s}  ${n}`);
   const failed = results.filter(r => r[0] === 'FAIL').length;
   console.log(failed ? `\n${failed} FAILED, ${passed} passed` : `\nALL ${passed} PASSED`);

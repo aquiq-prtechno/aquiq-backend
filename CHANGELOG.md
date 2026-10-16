@@ -1,6 +1,9 @@
 # AQUIQ backend — release history
 Series: MAJOR.MINOR.PATCH. MINOR = new feature, PATCH = fix. Current version is also at `GET /version`.
 
+## 1.5.1 — 19 Oct 2026
+- New service-report email: subject "SERVICE REPORT – FSR-<ticket>", AQUIQ-FSR body (Hey <customer>, Team, Closed By = who approved, Regards AQUIQ FSR-ADMIN, system-generated notice). Styled HTML version plus plain text.
+
 ## 1.5.0 — 19 Oct 2026
 - Customer can cancel a request until the engineer arrives (POST /customer/service-request/cancel). Ticket closes, engineer gets a push, customer gets an email with the care team in CC.
 
