@@ -13,13 +13,13 @@ async function test(name, fn) {
 }
 const tick = () => new Promise(r => setImmediate(r));
 
-function world({ enabled = true, email = 'owner@saffron.test', fail = false } = {}) {
+function world({ enabled = true, email = 'owner@saffron.test', fail = false, copyTo = null } = {}) {
   const c = clock('2026-10-16T06:00:00Z');
   const store = memStore(customers);
   store.getReportByTicket = async () => null;
   store.getCustomerEmail = async () => email;
   const sent = [];
-  const mailer = { enabled, send: async (m) => { if (fail) throw new Error('smtp down'); sent.push(m); } };
+  const mailer = { enabled, copyTo, send: async (m) => { if (fail) throw new Error('smtp down'); sent.push(m); } };
   const mail = M.createCustomerMailer(store, mailer, { log: { error() {} } });
   const ts = T.createTicketService(store, { now: c.now, mail });
   const es = E.createEngineerService(store, { now: c.now, auth: fakeAccounts() });
@@ -29,6 +29,20 @@ function world({ enabled = true, email = 'owner@saffron.test', fail = false } = 
 const ASK = { store_id: CUST, phone: '9999900000', issue_category: 'Low or no water flow', description: 'No water' };
 
 (async () => {
+  await test('team copy: raising a ticket also emails the AQUIQ team, even if the customer has no email', async () => {
+    const w = world({ copyTo: 'team@aquiq.test', email: null });
+    await w.cs.request(ASK);
+    await tick(); await tick();
+    assert.strictEqual(w.sent.length, 1);
+    assert.strictEqual(w.sent[0].to, 'team@aquiq.test');
+    assert.ok(/^\[AQUIQ team\]/.test(w.sent[0].subject));
+  });
+  await test('team copy: with an email on the account both the customer and the team get one', async () => {
+    const w = world({ copyTo: 'team@aquiq.test' });
+    await w.cs.request(ASK);
+    await tick(); await tick();
+    assert.deepStrictEqual(w.sent.map(m => m.to).sort(), ['owner@saffron.test', 'team@aquiq.test']);
+  });
   await test('relay mode: the message goes to the relay over HTTPS with the secret and a base64 attachment', async () => {
     const R = require('../reports');
     const calls = [];

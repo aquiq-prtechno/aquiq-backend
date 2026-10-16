@@ -1,6 +1,9 @@
 # AQUIQ backend — release history
 Series: MAJOR.MINOR.PATCH. MINOR = new feature, PATCH = fix. Current version is also at `GET /version`.
 
+## 1.4.2 — 16 Oct 2026
+- The AQUIQ team (REPORT_COPY_TO) now also gets an email when a customer raises a ticket, an engineer is late, or a customer is not satisfied. Mail-test errors are readable.
+
 ## 1.4.1 — 18 Oct 2026
 - Mail provider `relay` (MAIL_PROVIDER=relay, MAIL_RELAY_URL, MAIL_RELAY_SECRET). App-password spaces ignored.
 
