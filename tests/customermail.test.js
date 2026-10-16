@@ -29,19 +29,14 @@ function world({ enabled = true, email = 'owner@saffron.test', fail = false, cop
 const ASK = { store_id: CUST, phone: '9999900000', issue_category: 'Low or no water flow', description: 'No water' };
 
 (async () => {
-  await test('team copy: raising a ticket also emails the AQUIQ team, even if the customer has no email', async () => {
-    const w = world({ copyTo: 'team@aquiq.test', email: null });
-    await w.cs.request(ASK);
-    await tick(); await tick();
-    assert.strictEqual(w.sent.length, 1);
-    assert.strictEqual(w.sent[0].to, 'team@aquiq.test');
-    assert.ok(/^\[AQUIQ team\]/.test(w.sent[0].subject));
-  });
-  await test('team copy: with an email on the account both the customer and the team get one', async () => {
+  await test('care team is in CC on the customer email; with no customer email the team still gets it', async () => {
     const w = world({ copyTo: 'team@aquiq.test' });
-    await w.cs.request(ASK);
-    await tick(); await tick();
-    assert.deepStrictEqual(w.sent.map(m => m.to).sort(), ['owner@saffron.test', 'team@aquiq.test']);
+    await w.cs.request(ASK); await tick();
+    assert.strictEqual(w.sent.length, 1);
+    assert.strictEqual(w.sent[0].to, 'owner@saffron.test'); assert.strictEqual(w.sent[0].cc, 'team@aquiq.test');
+    const n = world({ copyTo: 'team@aquiq.test', email: null });
+    await n.cs.request(ASK); await tick();
+    assert.strictEqual(n.sent.length, 1); assert.strictEqual(n.sent[0].to, 'team@aquiq.test'); assert.match(n.sent[0].subject, /no email/);
   });
   await test('relay mode: the message goes to the relay over HTTPS with the secret and a base64 attachment', async () => {
     const R = require('../reports');
@@ -56,20 +51,20 @@ const ASK = { store_id: CUST, phone: '9999900000', issue_category: 'Low or no wa
     assert.strictEqual(R.createMailer({ MAIL_PROVIDER: 'relay', MAIL_RELAY_URL: 'u' }, http).enabled, false, 'needs both url and secret');
   });
 
-  await test('the customer gets an email at each step, to the registered account email', async () => {
+  await test('the customer gets emails for request, delay and reopen only, to the registered account email', async () => {
     const w = world();
     const eng = await w.es.register({ name: 'Ravi Kumar', phone: '9876543210', pincode: '122001', id_proof_type: 'pan', id_proof_ref: 'ABCDE1234F' }, ADMIN);
     const o = await w.cs.request(ASK); await tick();
     assert.match(w.sent[0].subject, /received/); assert.match(w.sent[0].text, /PMR/);
     assert.strictEqual(w.sent[0].to, 'owner@saffron.test');
     await w.ts.act(o.ticket.id, { action: 'accept', engineer_id: eng.id, eta_minutes: 30 }, ADMIN); await tick();
-    assert.match(w.sent[1].subject, /Engineer assigned/); assert.match(w.sent[1].text, /Ravi Kumar/);
+    assert.strictEqual(w.sent.length, 1, 'no email when an engineer is assigned');
     const e = await w.store.getEngineer(eng.id);
     await w.ts.engineerAct(e, o.ticket.id, { action: 'arrive', lat: 28.45, lng: 77.02 });
     await w.ts.engineerAct(e, o.ticket.id, { action: 'work_done', checklist: ALL_TICKS }); await tick();
-    assert.match(w.sent[2].subject, /please approve/);
+    assert.strictEqual(w.sent.length, 1, 'no email when the work is finished');
     await w.ts.act(o.ticket.id, { action: 'not_satisfied', note: 'still leaking' }, ADMIN); await tick();
-    assert.match(w.sent[3].subject, /reopened/);
+    assert.match(w.sent[1].subject, /reopened/);
   });
 
   await test('a late engineer triggers one "running late" email', async () => {

@@ -41,7 +41,7 @@ const KNOWLEDGE = [
   {
     id: 'emails', title: 'Emails you receive',
     keywords: ['email', 'mail', 'emails', 'notification', 'notify', 'inform', 'update me', 'inbox', 'get an email', 'get email', 'send email', 'email me', 'mail me', 'by email', 'on email'],
-    text: 'AQUIQ emails you at each step, to the email your AQUIQ account is registered with: when your request is received (with your ticket number), when an engineer is assigned (with their name and expected time), if the engineer is running late, when the work is finished and needs your approval, if you say you are not satisfied and the job is reopened, and finally with the service report PDF when the service is complete. You can also follow everything live in the app.',
+    text: 'AQUIQ emails you at the key moments, to the email your AQUIQ account is registered with: when your request is received (with your ticket number), if the engineer is running late, if you say you are not satisfied and the job is reopened, and finally with the service report PDF once you have approved the work. The AQUIQ care team is copied on these emails. When an engineer is assigned and when the work is finished you are told in the app (and by notification) rather than by email. You can follow everything live in the app.',
   },
   {
     id: 'contact', title: 'Changing your email or mobile number',
@@ -66,7 +66,7 @@ const KNOWLEDGE = [
   {
     id: 'whatsnew', title: 'Recent updates',
     keywords: ['new', 'update', 'updates', 'feature', 'features', 'changed', 'latest', 'recent', 'added', 'kya naya'],
-    text: 'Recent updates to AQUIQ (October 2026): you can now Request Service inside the app and see the status live; you can track your engineer with an arrival time and a map; you can approve the finished work or tell us what is still wrong; every service has a PDF report with the AQUIQ letterhead; the Visit Log shows each visit in one line and can be downloaded as Excel or PDF; you can rate each service from 1 to 5 stars; and you also get an email at every step of a service; and a "What\'s new" note appears after every update. Earlier (August 2026): monthly reports in PDF and Excel, predictive maintenance alerts, and Ask AQUIQ.',
+    text: 'Recent updates to AQUIQ (October 2026): you can now Request Service inside the app and see the status live; you can track your engineer with an arrival time and a map; you can approve the finished work or tell us what is still wrong; every service has a PDF report with the AQUIQ letterhead; the Visit Log shows each visit in one line and can be downloaded as Excel or PDF; you can rate each service from 1 to 5 stars; and you also get an email when your request is received, if the engineer is late, if a job is reopened, and with the final report; and a "What\'s new" note appears after every update. Earlier (August 2026): monthly reports in PDF and Excel, predictive maintenance alerts, and Ask AQUIQ.',
   },
   {
     id: 'support', title: 'Contact and support',

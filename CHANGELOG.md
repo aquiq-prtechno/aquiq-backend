@@ -1,6 +1,9 @@
 # AQUIQ backend — release history
 Series: MAJOR.MINOR.PATCH. MINOR = new feature, PATCH = fix. Current version is also at `GET /version`.
 
+## 1.4.3 — 16 Oct 2026
+- Care team is now in CC on every customer email (replaces the separate team emails). No email when an engineer is assigned or when work is finished. Customers with no email: the care team still gets a flagged copy.
+
 ## 1.4.2 — 16 Oct 2026
 - The AQUIQ team (REPORT_COPY_TO) now also gets an email when a customer raises a ticket, an engineer is late, or a customer is not satisfied. Mail-test errors are readable.
 
