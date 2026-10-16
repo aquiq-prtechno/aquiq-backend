@@ -1253,6 +1253,11 @@ app.use('/engineer', engineerApi.createEngineerApiRouter({
 }));
 ticketsModule.startTicketWatcher(ticketService, cron);
 
+// Public: which release of the AQUIQ server is running (matches package.json and CHANGELOG.md)
+app.get('/version', (_req, res) => {
+  res.json({ name: 'AQUIQ backend', version: require('./package.json').version, released: '17 Oct 2026' });
+});
+
 // ─── Start Server ─────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
