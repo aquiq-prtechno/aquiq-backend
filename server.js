@@ -1204,7 +1204,9 @@ const serviceStore = {
 // Engineer logins need the service key (creating users is a privileged Supabase action).
 const engineerAccounts = process.env.SUPABASE_SERVICE_KEY ? engineersModule.supabaseEngineerAuth(supabase) : null;
 const pushService = require('./push').createPushService(serviceStore, { enabled: process.env.PUSH_ENABLED !== 'false' });
-const ticketService = ticketsModule.createTicketService(serviceStore, { push: pushService });
+const sharedMailer = require('./reports').createMailer();
+const customerMail = require('./customerMail').createCustomerMailer(serviceStore, sharedMailer);
+const ticketService = ticketsModule.createTicketService(serviceStore, { push: pushService, mail: customerMail });
 const engineerService = engineersModule.createEngineerService(serviceStore, { auth: engineerAccounts });
 app.use('/admin/tickets', ticketsModule.createTicketsRouter(ticketService));
 app.get('/admin/engineers/:id/scorecard', async (req, res) => {
@@ -1213,7 +1215,7 @@ app.get('/admin/engineers/:id/scorecard', async (req, res) => {
 });
 app.use('/admin/engineers', engineersModule.createEngineersRouter(engineerService));
 const reportService = reportsModule.createReportService(serviceStore, ticketService, {
-  mailer: reportsModule.createMailer(),
+  mailer: sharedMailer,
   fetchBytes: async (url) => Buffer.from((await axios.get(url, { responseType: 'arraybuffer', timeout: 20000 })).data),
 });
 app.use('/admin/service-reports', require('./reports').createReportsAdminRouter(reportService));

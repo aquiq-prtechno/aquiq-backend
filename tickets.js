@@ -211,7 +211,7 @@ function siteOf(t) {
   return { pincode: t.pincode, latitude: t.latitude, longitude: t.longitude };
 }
 
-function createTicketService(store, { now = () => new Date(), push = null } = {}) {
+function createTicketService(store, { now = () => new Date(), push = null, mail = null } = {}) {
   // How many registered, active engineers cover each ticket's site (live, never stale).
   async function contextFor() {
     const engineers = await store.listActiveEngineers();
@@ -266,6 +266,7 @@ function createTicketService(store, { now = () => new Date(), push = null } = {}
       meta: { ticket_no: ticketNo, source: opts.source === 'customer_app' ? 'customer_app' : 'admin' },
     });
     const ctx = await contextFor();
+    if (mail) mail.created(row);
     if (push) {
       const onDuty = new Set(ctx.engineers.filter(e => e.on_duty !== false).map(e => e.id));
       const ids = rankEngineers(siteOf(row), ctx.engineers).recommended.map(e => e.id).filter(id => onDuty.has(id));
@@ -355,6 +356,11 @@ function createTicketService(store, { now = () => new Date(), push = null } = {}
       action, from_status: ticket.status, to_status: to, note: note || null,
       meta: Object.keys(meta).length ? meta : null,
     });
+    if (mail) {
+      if (action === 'accept' || action === 'reassign') mail.assigned(updated);
+      if (action === 'work_done') mail.workDone(updated);
+      if (action === 'not_satisfied') mail.reopened(updated);
+    }
     if (push && actor.role !== 'engineer') {
       if (action === 'accept' || action === 'reassign') push.assigned(updated, updated.engineer_id);
     }
@@ -427,6 +433,7 @@ function createTicketService(store, { now = () => new Date(), push = null } = {}
       const patch = { attention_reason: att, attention_at: att ? iso : null };
       const ok = await store.updateTicketIfStatus(t.id, t.status, patch);
       if (!ok) continue;
+      if (mail && att === 'engineer_late') mail.delayed({ ...t, ...patch });
       await store.insertEvent({
         ticket_id: t.id, actor: 'system', actor_role: 'system',
         action: att ? 'attention' : 'attention_cleared',
