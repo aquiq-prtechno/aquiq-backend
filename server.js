@@ -1268,7 +1268,7 @@ app.post('/admin/mail-test', express.json(), async (req, res) => {
   } catch (err) {
     const detail = (err.response && err.response.data && (err.response.data.error || err.response.data.message || JSON.stringify(err.response.data))) || err.message || String(err);
     console.error('[MAIL-TEST]', detail);
-    res.status(502).json({ error: String(detail).slice(0, 300), code: err.code || null, provider: sharedMailer.provider });
+    res.status(502).json({ error: (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 300), code: err.code || null, provider: sharedMailer.provider });
   }
 });
 
