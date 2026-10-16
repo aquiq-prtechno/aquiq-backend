@@ -224,7 +224,8 @@ function createMailer(env = process.env, http = require('axios')) {
   const provider = String(env.MAIL_PROVIDER || 'smtp').toLowerCase();
   const fromName = env.MAIL_FROM_NAME || 'AQUIQ Service Desk';
   const fromAddr = env.MAIL_FROM || env.MAIL_USER;
-  const enabled = provider === 'brevo' ? !!(env.BREVO_API_KEY && fromAddr)
+  const enabled = provider === 'relay' ? !!(env.MAIL_RELAY_URL && env.MAIL_RELAY_SECRET)
+    : provider === 'brevo' ? !!(env.BREVO_API_KEY && fromAddr)
     : provider === 'resend' ? !!(env.RESEND_API_KEY && fromAddr)
     : !!(env.MAIL_USER && env.MAIL_PASS);
   let transport = null;
@@ -232,6 +233,14 @@ function createMailer(env = process.env, http = require('axios')) {
 
   async function send({ to, cc, subject, text, attachments }) {
     if (!enabled) throw httpError(503, 'Mail is not set up.');
+    if (provider === 'relay') {
+      // hand the message to the AQUIQ mail relay over HTTPS (it sends through Gmail)
+      await http.post(env.MAIL_RELAY_URL, {
+        to: list(to), ...(list(cc).length ? { cc: list(cc) } : {}), subject, text,
+        ...(attachments && attachments.length ? { attachments: attachments.map(a => ({ filename: a.filename, content: Buffer.from(a.content).toString('base64') })) } : {}),
+      }, { headers: { Authorization: `Bearer ${env.MAIL_RELAY_SECRET}`, 'content-type': 'application/json' }, timeout: 25000, maxBodyLength: 6 * 1024 * 1024 });
+      return;
+    }
     if (provider === 'brevo') {
       await http.post('https://api.brevo.com/v3/smtp/email', {
         sender: { name: fromName, email: fromAddr },
@@ -262,7 +271,7 @@ function createMailer(env = process.env, http = require('axios')) {
   }
 
   return {
-    enabled, provider, from: fromAddr || null,
+    enabled, provider, from: fromAddr || (provider === 'relay' ? 'the AQUIQ Gmail account (via relay)' : null),
     copyTo: env.REPORT_COPY_TO || 'careprtech@hotmail.com',
     send,
   };

@@ -29,6 +29,19 @@ function world({ enabled = true, email = 'owner@saffron.test', fail = false } = 
 const ASK = { store_id: CUST, phone: '9999900000', issue_category: 'Low or no water flow', description: 'No water' };
 
 (async () => {
+  await test('relay mode: the message goes to the relay over HTTPS with the secret and a base64 attachment', async () => {
+    const R = require('../reports');
+    const calls = [];
+    const http = { post: async (url, body, opts) => { calls.push({ url, body, opts }); return {}; } };
+    const m = R.createMailer({ MAIL_PROVIDER: 'relay', MAIL_RELAY_URL: 'https://x.vercel.app/api/send-mail', MAIL_RELAY_SECRET: 's3cret' }, http);
+    assert.strictEqual(m.enabled, true); assert.strictEqual(m.provider, 'relay');
+    await m.send({ to: 'a@b.co', cc: 'c@d.co', subject: 'S', text: 'T', attachments: [{ filename: 'r.pdf', content: Buffer.from('%PDF') }] });
+    assert.strictEqual(calls[0].url, 'https://x.vercel.app/api/send-mail');
+    assert.strictEqual(calls[0].opts.headers.Authorization, 'Bearer s3cret');
+    assert.deepStrictEqual(calls[0].body.to, ['a@b.co']); assert.strictEqual(calls[0].body.attachments[0].content, Buffer.from('%PDF').toString('base64'));
+    assert.strictEqual(R.createMailer({ MAIL_PROVIDER: 'relay', MAIL_RELAY_URL: 'u' }, http).enabled, false, 'needs both url and secret');
+  });
+
   await test('the customer gets an email at each step, to the registered account email', async () => {
     const w = world();
     const eng = await w.es.register({ name: 'Ravi Kumar', phone: '9876543210', pincode: '122001', id_proof_type: 'pan', id_proof_ref: 'ABCDE1234F' }, ADMIN);

@@ -1266,7 +1266,7 @@ app.post('/admin/mail-test', express.json(), async (req, res) => {
     await sharedMailer.send({ to, subject: 'AQUIQ test email', text: 'This is a test email from the AQUIQ server. If you can read it, email sending works.\n\nAQUIQ Service Desk' });
     res.json({ ok: true, provider: sharedMailer.provider, from: sharedMailer.from, ms: Date.now() - started });
   } catch (err) {
-    const detail = (err.response && err.response.data && (err.response.data.message || JSON.stringify(err.response.data))) || err.message || String(err);
+    const detail = (err.response && err.response.data && (err.response.data.error || err.response.data.message || JSON.stringify(err.response.data))) || err.message || String(err);
     console.error('[MAIL-TEST]', detail);
     res.status(502).json({ error: String(detail).slice(0, 300), code: err.code || null, provider: sharedMailer.provider });
   }
