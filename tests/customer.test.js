@@ -134,7 +134,8 @@ const ASK = { store_id: CUST, phone: '99999 00000', issue_category: 'Low or no w
     const o = await w.cs.request(ASK);
     await w.ts.act(o.ticket.id, { action: 'accept', engineer_id: eng.id, eta_minutes: 30 }, ADMIN);
     const e = await w.store.getEngineer(eng.id);
-    assert.strictEqual((await w.cs.list(ASK)).tickets[0].engineer_location, null);       // no position yet
+    const before = (await w.cs.list(ASK)).tickets[0].engineer_location;
+    assert.ok(before.site && before.lat === undefined, 'site map shown at once, no engineer position yet');
     await ok400(w.ts.engineerLocation(e, o.ticket.id, { lat: 1, lng: 1 }), 400, /not valid/);
     await w.ts.engineerLocation(e, o.ticket.id, { lat: 28.50, lng: 77.10 });             // ~10 km from the site
     const loc = (await w.cs.list(ASK)).tickets[0].engineer_location;
@@ -142,10 +143,13 @@ const ASK = { store_id: CUST, phone: '99999 00000', issue_category: 'Low or no w
     assert.ok(loc.eta_minutes >= 5 && loc.eta_minutes <= 90);
     assert.strictEqual(typeof loc.site.lat, 'number');
     w.c.add(15 * 60);                                                                     // stale after 10 minutes
-    assert.strictEqual((await w.cs.list(ASK)).tickets[0].engineer_location, null);
+    assert.strictEqual((await w.cs.list(ASK)).tickets[0].engineer_location.lat, undefined);   // stale position is not shown
     await w.ts.engineerAct(e, o.ticket.id, { action: 'arrive', lat: 28.45, lng: 77.02 });
     await w.ts.engineerLocation(e, o.ticket.id, { lat: 28.45, lng: 77.02 });
-    assert.strictEqual((await w.cs.list(ASK)).tickets[0].engineer_location, null);        // arrived: tracking stops
+    const atSite = (await w.cs.list(ASK)).tickets[0].engineer_location;
+    assert.strictEqual(atSite.arrived, true); assert.strictEqual(atSite.eta_minutes, undefined);
+    await w.ts.engineerAct(e, o.ticket.id, { action: 'work_done', checklist: { flushed: true, leaks: true, tds: true, pump: true, clean: true } });
+    assert.strictEqual((await w.cs.list(ASK)).tickets[0].engineer_location, null);        // hidden after work done
   });
 
   await test('engineer history lists finished jobs only, newest first', async () => {

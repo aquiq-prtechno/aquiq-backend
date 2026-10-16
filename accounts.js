@@ -6,6 +6,7 @@
 const express = require('express');
 const { generatePassword } = require('./engineers');
 const { hashPassword, strongEnough } = require('./passwords');
+const { isOld, LATEST } = require('./versions');
 
 const ONLINE_MS = 10 * 60 * 1000;
 const httpError = (status, message) => { const e = new Error(message); e.status = status; return e; };
@@ -28,6 +29,7 @@ function createAccountsService(store, { now = () => new Date() } = {}) {
         login: [u.email, u.phone].filter(Boolean).join('  ·  ') || '—',
         phone: u.phone || null, email: u.email || null, status: state(u), has_password: !!u.has_password,
         stores: mine.length, running: mine.filter(running).length, last_seen: null, created_at: u.created_at,
+        app_version: u.app_version || null, app_seen_at: u.app_seen_at || null, app_old: isOld(u.app_version, 'customer'),
       });
     }
     for (const s of stores) {
@@ -37,9 +39,10 @@ function createAccountsService(store, { now = () => new Date() } = {}) {
         phone: s.phone || null, email: s.email || null, status: state(s), has_password: false,
         stores: null, running: running(s) ? 1 : 0, last_seen: s.last_seen || null, device_id: s.device_id || null,
         created_at: s.created_at,
+        app_version: s.app_version || null, app_seen_at: s.app_seen_at || null, app_old: isOld(s.app_version, 'customer'),
       });
     }
-    return { accounts: rows, at: new Date(at).toISOString() };
+    return { accounts: rows, latest_version: LATEST.customer, at: new Date(at).toISOString() };
   }
 
   async function newPassword(uhadId, actor, chosen) {
@@ -79,10 +82,10 @@ function supabaseAccountsStore(sb) {
   return {
     async listUhads() {
       // the password column is read only to say whether one exists; it never leaves this function
-      const rows = await one(sb.from('uhads').select('id,name,company,email,phone,account_status,created_at,password').order('company'));
-      return rows.map(({ password, ...r }) => ({ ...r, has_password: !!password }));
+      const rows = await one(sb.from('uhads').select('*').order('company'));
+      return rows.map(({ password, password_hash, ...r }) => ({ ...r, has_password: !!(password || password_hash) }));
     },
-    listStores: () => one(sb.from('customers').select('id,name,phone,email,uhad_id,device_id,last_seen,account_status,created_at').eq('role', 'uhsa').order('name')),
+    listStores: () => one(sb.from('customers').select('*').eq('role', 'uhsa').order('name')),
     getUhad: (id) => one(sb.from('uhads').select('id,name,company,email,phone').eq('id', id).maybeSingle()),
     // only a hash is stored; the plain-text column is emptied
     async setUhadPassword(id, passwordHash) { await one(sb.from('uhads').update({ password_hash: passwordHash, password: null }).eq('id', id)); },

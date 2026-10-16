@@ -50,18 +50,24 @@ function createCustomerService(store, tickets, { now = () => new Date(), reports
     return c;
   }
 
-  // Where the engineer is and roughly how long they need — only while they are on the way.
+  // The map card: from "engineer accepted" until "work done". It always has the customer's own site;
+  // the engineer's latest position (and a rough arrival time) is added when the phone has shared one.
   function trackOf(t) {
-    if (t.status !== 'accepted' || t.eng_lat == null || t.eng_lng == null || !t.eng_loc_at) return null;
-    if (now().getTime() - new Date(t.eng_loc_at).getTime() > LOCATION_FRESH_MS) return null;
-    const out = { lat: Number(t.eng_lat), lng: Number(t.eng_lng), updated_at: t.eng_loc_at };
-    if (t.latitude != null && t.longitude != null) {
-      out.site = { lat: Number(t.latitude), lng: Number(t.longitude) };   // the customer's own site
-      const straight = km({ lat: out.lat, lng: out.lng }, { lat: Number(t.latitude), lng: Number(t.longitude) });
-      out.distance_km = Math.round(straight * ROAD_FACTOR * 10) / 10;
-      out.eta_minutes = Math.max(1, Math.round((out.distance_km / AVG_KMH) * 60));
+    if (!['accepted', 'arrived'].includes(t.status)) return null;          // hidden again after work done
+    const out = { arrived: t.status === 'arrived' };
+    const hasSite = t.latitude != null && t.longitude != null;
+    if (hasSite) out.site = { lat: Number(t.latitude), lng: Number(t.longitude) };
+    const fresh = t.eng_loc_at && now().getTime() - new Date(t.eng_loc_at).getTime() <= LOCATION_FRESH_MS;
+    const known = t.eng_lat != null && t.eng_lng != null && t.eng_loc_at && (fresh || t.status === 'arrived');
+    if (known) {
+      out.lat = Number(t.eng_lat); out.lng = Number(t.eng_lng); out.updated_at = t.eng_loc_at;
+      if (hasSite && t.status === 'accepted') {
+        const straight = km({ lat: out.lat, lng: out.lng }, out.site);
+        out.distance_km = Math.round(straight * ROAD_FACTOR * 10) / 10;
+        out.eta_minutes = Math.max(1, Math.round((out.distance_km / AVG_KMH) * 60));
+      }
     }
-    return out;
+    return out.site || known ? out : null;
   }
 
   function view(t) {

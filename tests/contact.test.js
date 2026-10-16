@@ -26,6 +26,7 @@ function world({ uhadEmail = null, enabled = true } = {}) {
     setStoreEmail: async (id, e) => { db.stores[id].email = e; },
     setUhadEmail: async (id, e) => { db.uhads[id].email = e; },
     setUhadPhone: async (id, p) => { db.uhads[id].phone = p; },
+    setAppVersion: async (k, id, v) => { (k === 'uhad' ? db.uhads : db.stores)[id].app_version = v; },
     findUhadFull: async (e) => Object.values(db.uhads).find(u => u.email === e) || null,
     setUhadPasswordHash: async (id, h) => { db.uhads[id].password_hash = h; db.uhads[id].password = null; },
     findStoresByVerifiedEmail: async (e) => Object.values(db.stores).filter(x => x.email === e && x.verified),
@@ -192,6 +193,25 @@ const U = { kind: 'uhad', id: UHAD, phone: '8888800000' };
     assert.ok(PW.verifyPassword('Secret123', h1)); assert.ok(!PW.verifyPassword('secret123', h1));
     assert.ok(!PW.verifyPassword('x', 'not-a-hash'));
     assert.ok(PW.strongEnough('abcdefg1') && !PW.strongEnough('abcdefgh') && !PW.strongEnough('a1'));
+  });
+
+  await test('the app reports its version; the admin list flags old versions', async () => {
+    const V = require('../versions');
+    const w = world();
+    await w.svc.ping({ ...S, version: '1.2.0' });
+    assert.strictEqual(w.db.stores[STORE].app_version, '1.2.0');
+    await ok400(w.svc.ping({ ...S, version: 'abc' }), 400);
+    await ok400(w.svc.ping({ ...S, phone: '9000000000', version: '1.4.0' }), 401);
+    assert.strictEqual(V.isOld('1.2.0', 'customer'), true);
+    assert.strictEqual(V.isOld(V.LATEST.customer, 'customer'), false);
+    assert.strictEqual(V.isOld(null, 'customer'), false);
+    assert.strictEqual(V.compare('1.10.0', '1.9.0'), 1);
+    const store = {
+      listUhads: async () => [], listStores: async () => [{ id: STORE, name: 'S', phone: '9', uhad_id: 'x', app_version: '1.2.0', account_status: 'active' }],
+    };
+    const out = await A.createAccountsService(store).list();
+    assert.strictEqual(out.accounts[0].app_old, true);
+    assert.strictEqual(out.latest_version, V.LATEST.customer);
   });
 
   for (const [s, n] of results) console.log(`${s}  ${n}`);

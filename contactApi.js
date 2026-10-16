@@ -190,7 +190,16 @@ function createContactService(store, mailer, { now = () => new Date() } = {}) {
     return { ok: true };
   }
 
-  return { current, requestCode, confirm, loginCode, loginConfirm, uhadLogin, uhadForgot, uhadReset };
+  // The app tells us which release it is, so the admin can see who still runs an old one.
+  async function ping(input) {
+    const a = await who(input);
+    const version = String(input.version || '').slice(0, 20);
+    if (!/^\d+\.\d+\.\d+$/.test(version)) throw httpError(400, 'Invalid version.');
+    await store.setAppVersion(a.kind, a.id, version);
+    return { ok: true };
+  }
+
+  return { current, requestCode, confirm, loginCode, loginConfirm, uhadLogin, uhadForgot, uhadReset, ping };
 }
 
 function createContactRouter(service) {
@@ -205,6 +214,7 @@ function createContactRouter(service) {
   router.post('/current', wrap((req) => service.current(req.body || {})));
   router.post('/code', wrap((req) => service.requestCode(req.body || {})));
   router.post('/confirm', wrap((req) => service.confirm(req.body || {})));
+  router.post('/ping', wrap((req) => service.ping(req.body || {})));
   router.post('/uhad/login', wrap((req) => service.uhadLogin(req.body || {})));
   router.post('/uhad/forgot', wrap((req) => service.uhadForgot(req.body || {})));
   router.post('/uhad/reset', wrap((req) => service.uhadReset(req.body || {})));
@@ -219,6 +229,9 @@ function supabaseContactStore(sb) {
     getUhad: (id) => one(sb.from('uhads').select('id,name,phone,email').eq('id', id).maybeSingle()),
     getCustomer: (id) => one(sb.from('customers').select('id,name,phone,email,uhad_id').eq('id', id).maybeSingle()),
     findUhadByEmail: (email) => one(sb.from('uhads').select('id').eq('email', email).maybeSingle()),
+    async setAppVersion(kind, id, version) {
+      await one(sb.from(kind === 'uhad' ? 'uhads' : 'customers').update({ app_version: version, app_seen_at: new Date().toISOString() }).eq('id', id));
+    },
     findUhadFull: (email) => one(sb.from('uhads').select('*').eq('email', email).maybeSingle()),
     // from now on the password is kept only as a hash; the old plain-text column is emptied
     async setUhadPasswordHash(id, passwordHash) { await one(sb.from('uhads').update({ password_hash: passwordHash, password: null }).eq('id', id)); },

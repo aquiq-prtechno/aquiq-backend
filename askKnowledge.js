@@ -16,7 +16,7 @@ const KNOWLEDGE = [
   {
     id: 'track', title: 'Tracking the engineer',
     keywords: ['track', 'where', 'eta', 'arrive', 'how long', 'kab', 'map', 'location', 'reach', 'coming'],
-    text: 'While the engineer is on the way, the Request Service card shows roughly how many minutes away they are, the distance, and a small map with the engineer and your site. The time is an estimate based on distance and city traffic. When they reach your site, tracking stops.',
+    text: 'As soon as an engineer accepts your request, the Request Service card shows a small map with your site. Once the engineer\'s phone shares its location, the map also shows the engineer, roughly how many minutes away they are, and the distance (an estimate based on distance and city traffic). When they arrive, the card says so, and when the work is marked done the map disappears until your next request.',
   },
   {
     id: 'rules', title: 'Rules AQUIQ engineers follow (SOP)',

@@ -55,6 +55,11 @@ function createEngineerApiRouter({ tickets, store, auth, accounts, reports }) {
       return res.status(403).json({ error: MESSAGES.password_change_required, code: 'password_change_required' });
     }
     req.engineer = who.engineer; req.engUser = who.user; req.mustChange = who.mustChange;
+    // remember which app release this engineer runs (only when it changes)
+    const v = String(req.get('x-app-version') || '').slice(0, 20);
+    if (/^\d+\.\d+\.\d+$/.test(v) && v !== who.engineer.app_version && store.updateEngineer) {
+      store.updateEngineer(who.engineer.id, { app_version: v, app_seen_at: new Date().toISOString() }).catch(() => {});
+    }
     next();
   };
   const wrap = (fn) => async (req, res) => {

@@ -70,3 +70,11 @@ alter table customers add column if not exists email_verified_at timestamptz;
 -- 10) Company (UHAD) passwords are kept as a salted hash. The old plain-text column is emptied
 --     account by account, as each one logs in or sets a new password.
 alter table uhads add column if not exists password_hash text;
+
+-- 11) Which release of the app each account / engineer is running (so old versions can be spotted).
+alter table customers add column if not exists app_version text;
+alter table customers add column if not exists app_seen_at timestamptz;
+alter table uhads add column if not exists app_version text;
+alter table uhads add column if not exists app_seen_at timestamptz;
+alter table engineers add column if not exists app_version text;
+alter table engineers add column if not exists app_seen_at timestamptz;

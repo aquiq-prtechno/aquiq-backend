@@ -1253,9 +1253,28 @@ app.use('/engineer', engineerApi.createEngineerApiRouter({
 }));
 ticketsModule.startTicketWatcher(ticketService, cron);
 
+// Admin: is email working? Sends a real test message and returns the exact error if it fails.
+app.get('/admin/mail-status', (_req, res) => {
+  res.json({ enabled: sharedMailer.enabled, provider: sharedMailer.provider, from: sharedMailer.from, copy_to: sharedMailer.copyTo });
+});
+app.post('/admin/mail-test', express.json(), async (req, res) => {
+  const to = String((req.body || {}).to || '').trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) return res.status(400).json({ error: 'Enter a valid email address.' });
+  if (!sharedMailer.enabled) return res.status(503).json({ error: 'Mail is not set up on the server (MAIL_USER / MAIL_PASS are missing).', provider: sharedMailer.provider });
+  const started = Date.now();
+  try {
+    await sharedMailer.send({ to, subject: 'AQUIQ test email', text: 'This is a test email from the AQUIQ server. If you can read it, email sending works.\n\nAQUIQ Service Desk' });
+    res.json({ ok: true, provider: sharedMailer.provider, from: sharedMailer.from, ms: Date.now() - started });
+  } catch (err) {
+    const detail = (err.response && err.response.data && (err.response.data.message || JSON.stringify(err.response.data))) || err.message || String(err);
+    console.error('[MAIL-TEST]', detail);
+    res.status(502).json({ error: String(detail).slice(0, 300), code: err.code || null, provider: sharedMailer.provider });
+  }
+});
+
 // Public: which release of the AQUIQ server is running (matches package.json and CHANGELOG.md)
 app.get('/version', (_req, res) => {
-  res.json({ name: 'AQUIQ backend', version: require('./package.json').version, released: '17 Oct 2026' });
+  res.json({ name: 'AQUIQ backend', version: require('./package.json').version, released: '17 Oct 2026', latest_apps: require('./versions').LATEST });
 });
 
 // ─── Start Server ─────────────────────────────────────────────────────────────

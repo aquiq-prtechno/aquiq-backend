@@ -1,6 +1,9 @@
 # AQUIQ backend — release history
 Series: MAJOR.MINOR.PATCH. MINOR = new feature, PATCH = fix. Current version is also at `GET /version`.
 
+## 1.4.0 — 18 Oct 2026
+- Mail providers (SMTP / Brevo / Resend over HTTPS), admin mail test. Map card rules (accepted → work done). App version reporting + latest-version list (versions.js). Migration section 11.
+
 ## 1.3.0 — 17 Oct 2026
 - Contact details: stores add an email, company accounts add email / change mobile, all with a 6-digit code.
 - Store login with a confirmed email + code. Company (UHAD) login on the server with hashed passwords; forgot-password by emailed code; admin reset stores a hash.

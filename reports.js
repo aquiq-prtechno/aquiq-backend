@@ -218,27 +218,52 @@ function renderPdf(report, images) {
 
 // ── mail (nodemailer) ───────────────────────────────────────────────────────
 
-function createMailer(env = process.env) {
-  const user = env.MAIL_USER; const pass = env.MAIL_PASS;
-  const enabled = !!(user && pass);
+function createMailer(env = process.env, http = require('axios')) {
+  // MAIL_PROVIDER: smtp (default, Gmail etc.), brevo or resend (both send over HTTPS, which works
+  // on hosts that block SMTP). Which one is used is only a Railway setting.
+  const provider = String(env.MAIL_PROVIDER || 'smtp').toLowerCase();
+  const fromName = env.MAIL_FROM_NAME || 'AQUIQ Service Desk';
+  const fromAddr = env.MAIL_FROM || env.MAIL_USER;
+  const enabled = provider === 'brevo' ? !!(env.BREVO_API_KEY && fromAddr)
+    : provider === 'resend' ? !!(env.RESEND_API_KEY && fromAddr)
+    : !!(env.MAIL_USER && env.MAIL_PASS);
   let transport = null;
-  return {
-    enabled,
-    copyTo: env.REPORT_COPY_TO || 'careprtech@hotmail.com',
-    async send({ to, cc, subject, text, attachments }) {
-      if (!enabled) throw httpError(503, 'Mail is not set up.');
-      if (!transport) {
-        const nodemailer = require('nodemailer');
-        transport = nodemailer.createTransport({
-          host: env.MAIL_HOST || 'smtp.gmail.com', port: Number(env.MAIL_PORT) || 465, secure: (Number(env.MAIL_PORT) || 465) === 465,
-          auth: { user, pass },
-        });
-      }
-      await transport.sendMail({
-        from: `"${env.MAIL_FROM_NAME || 'AQUIQ Service Desk'}" <${env.MAIL_FROM || user}>`,
-        to, cc, subject, text, attachments,
+  const list = (v) => (v == null ? [] : Array.isArray(v) ? v : [v]);
+
+  async function send({ to, cc, subject, text, attachments }) {
+    if (!enabled) throw httpError(503, 'Mail is not set up.');
+    if (provider === 'brevo') {
+      await http.post('https://api.brevo.com/v3/smtp/email', {
+        sender: { name: fromName, email: fromAddr },
+        to: list(to).map(email => ({ email })),
+        ...(list(cc).length ? { cc: list(cc).map(email => ({ email })) } : {}),
+        subject, textContent: text,
+        ...(attachments && attachments.length ? { attachment: attachments.map(a => ({ name: a.filename, content: Buffer.from(a.content).toString('base64') })) } : {}),
+      }, { headers: { 'api-key': env.BREVO_API_KEY, 'content-type': 'application/json' }, timeout: 20000 });
+      return;
+    }
+    if (provider === 'resend') {
+      await http.post('https://api.resend.com/emails', {
+        from: `${fromName} <${fromAddr}>`, to: list(to), ...(list(cc).length ? { cc: list(cc) } : {}), subject, text,
+        ...(attachments && attachments.length ? { attachments: attachments.map(a => ({ filename: a.filename, content: Buffer.from(a.content).toString('base64') })) } : {}),
+      }, { headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, 'content-type': 'application/json' }, timeout: 20000 });
+      return;
+    }
+    if (!transport) {
+      const nodemailer = require('nodemailer');
+      const port = Number(env.MAIL_PORT) || 465;
+      transport = nodemailer.createTransport({
+        host: env.MAIL_HOST || 'smtp.gmail.com', port, secure: port === 465, auth: { user: env.MAIL_USER, pass: env.MAIL_PASS },
+        connectionTimeout: 15000, greetingTimeout: 15000, socketTimeout: 20000,
       });
-    },
+    }
+    await transport.sendMail({ from: `"${fromName}" <${fromAddr}>`, to, cc, subject, text, attachments });
+  }
+
+  return {
+    enabled, provider, from: fromAddr || null,
+    copyTo: env.REPORT_COPY_TO || 'careprtech@hotmail.com',
+    send,
   };
 }
 
