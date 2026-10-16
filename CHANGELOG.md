@@ -1,6 +1,9 @@
 # AQUIQ backend — release history
 Series: MAJOR.MINOR.PATCH. MINOR = new feature, PATCH = fix. Current version is also at `GET /version`.
 
+## 1.5.2 — 19 Oct 2026
+- Request received, engineer late, reopened and cancelled emails now use the same AQUIQ layout as the service report (own wording for each, HTML + plain text).
+
 ## 1.5.1 — 19 Oct 2026
 - New service-report email: subject "SERVICE REPORT – FSR-<ticket>", AQUIQ-FSR body (Hey <customer>, Team, Closed By = who approved, Regards AQUIQ FSR-ADMIN, system-generated notice). Styled HTML version plus plain text.
 

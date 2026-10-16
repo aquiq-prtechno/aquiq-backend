@@ -38,6 +38,22 @@ const ASK = { store_id: CUST, phone: '9999900000', issue_category: 'Low or no wa
     await n.cs.request(ASK); await tick();
     assert.strictEqual(n.sent.length, 1); assert.strictEqual(n.sent[0].to, 'team@aquiq.test'); assert.match(n.sent[0].subject, /no email/);
   });
+  await test('every service email uses the AQUIQ layout with its own wording, text and html', async () => {
+    const sent = [];
+    const store = { getCustomerEmail: async () => 'c@x.test' };
+    const mail = M.createCustomerMailer(store, { enabled: true, copyTo: 'care@x.test', send: async (m) => sent.push(m) });
+    const t = { ticket_no: 'PMR2611790131016', contact_person: 'Anuj Thakur', customer_id: 'c1', issue_category: 'Water leakage', urgency: 'urgent', created_at: '2026-10-16T06:00:00Z', engineer_name: 'Ravi', eta_at: '2026-10-16T07:00:00Z' };
+    await mail.created(t); await mail.delayed(t); await mail.reopened(t); await mail.cancelled(t);
+    assert.strictEqual(sent.length, 4);
+    for (const m of sent) {
+      assert.match(m.text, /^AQUIQ\n\nTicket ID: PMR2611790131016/); assert.match(m.text, /Hey Anuj Thakur,/);
+      assert.match(m.text, /Team: AQUIQ-SERVICE DESK/); assert.match(m.text, /Regards,\nAQUIQ SERVICE-DESK/); assert.match(m.text, /system-generated notification/);
+      assert.match(m.html, /<b>Ticket ID:<\/b> PMR2611790131016/); assert.ok(!/WMS|PR TECHNO/.test(m.text + m.html));
+    }
+    assert.match(sent[0].text, /received your service request/); assert.match(sent[0].text, /Problem: Water leakage \(urgent\)/);
+    assert.match(sent[1].text, /running late/); assert.match(sent[1].text, /Promised by:/);
+    assert.match(sent[2].text, /reopened/); assert.match(sent[3].subject, /cancelled/); assert.match(sent[3].text, /no engineer will visit/);
+  });
   await test('relay mode: the message goes to the relay over HTTPS with the secret and a base64 attachment', async () => {
     const R = require('../reports');
     const calls = [];
