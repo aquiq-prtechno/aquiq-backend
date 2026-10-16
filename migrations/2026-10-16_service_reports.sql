@@ -66,3 +66,7 @@ alter table service_reports add column if not exists rated_at timestamptz;
 -- 9) A store can add its own email (confirmed with a code) so service updates and reports reach it.
 alter table customers add column if not exists email text;
 alter table customers add column if not exists email_verified_at timestamptz;
+
+-- 10) Company (UHAD) passwords are kept as a salted hash. The old plain-text column is emptied
+--     account by account, as each one logs in or sets a new password.
+alter table uhads add column if not exists password_hash text;

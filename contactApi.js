@@ -8,6 +8,7 @@
 const crypto = require('crypto');
 const express = require('express');
 const fileLinks = require('./fileLinks');
+const { hashPassword, verifyPassword, strongEnough, sameText } = require('./passwords');
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -131,7 +132,65 @@ function createContactService(store, mailer, { now = () => new Date() } = {}) {
     return { stores };
   }
 
-  return { current, requestCode, confirm, loginCode, loginConfirm };
+  // ── company account (UHAD): log in, and create a new password if it was forgotten ──
+  const publicUhad = ({ password, password_hash, ...rest }) => rest;
+
+  async function uhadLogin(input) {
+    const email = String(input.email || '').trim().toLowerCase();
+    const password = String(input.password || '');
+    const fail = () => httpError(401, 'Email or password is incorrect.');
+    if (!EMAIL_RE.test(email) || !password) throw fail();
+    const u = await store.findUhadFull(email);
+    let ok = false;
+    if (u) {
+      if (u.password_hash) ok = verifyPassword(password, u.password_hash);
+      else if (u.password) ok = sameText(password, u.password);
+    } else {
+      hashPassword('timing');            // same work whether or not the account exists
+    }
+    if (!ok) { throttle(email, 10, 'uhadwrong'); throw fail(); }
+    if (!u.password_hash) await store.setUhadPasswordHash(u.id, hashPassword(password));   // upgrade the old plain-text password
+    return { uhad: publicUhad(u) };
+  }
+
+  async function uhadForgot(input) {
+    const email = String(input.email || '').trim().toLowerCase();
+    if (!EMAIL_RE.test(email)) throw httpError(400, 'Enter your registered email address.');
+    throttle(email, 5, 'forgot');
+    if (!mailer || !mailer.enabled) throw httpError(503, 'Password reset by email is not available yet. Please contact AQUIQ support.');
+    const u = await store.findUhadFull(email);
+    const code = String(crypto.randomInt(100000, 1000000));
+    const token = fileLinks.sign({ k: 'uhadreset', email }, 600, now().getTime());
+    if (u) {
+      await mailer.send({
+        to: email, subject: 'Reset your AQUIQ password',
+        text: `Your AQUIQ password reset code is ${code}.\n\nIt works for 10 minutes. Enter it in the app and choose a new password. If you did not ask for this, ignore this email; your password has not changed.\n\nAQUIQ Service Desk`,
+      });
+    }
+    return { token: `${token}.${hash(code, token)}`, sent_to: email.replace(/^(.).*(@.*)$/, '$1***$2') };
+  }
+
+  async function uhadReset(input) {
+    const email = String(input.email || '').trim().toLowerCase();
+    const bad = () => httpError(400, 'That code is not correct or has expired.');
+    const parts = String(input.token || '').split('.');
+    if (parts.length !== 3) throw bad();
+    const signed = `${parts[0]}.${parts[1]}`;
+    const p = fileLinks.verify(signed, now().getTime());
+    if (!p || p.k !== 'uhadreset' || p.email !== email) throw bad();
+    const want = hash(String(input.code || '').trim(), signed);
+    if (parts[2].length !== want.length || !crypto.timingSafeEqual(Buffer.from(parts[2]), Buffer.from(want))) {
+      throttle(email, 8, 'resetwrong');
+      throw bad();
+    }
+    if (!strongEnough(input.new_password)) throw httpError(400, 'Use at least 8 characters, with letters and numbers.');
+    const u = await store.findUhadFull(email);
+    if (!u) throw bad();
+    await store.setUhadPasswordHash(u.id, hashPassword(input.new_password));
+    return { ok: true };
+  }
+
+  return { current, requestCode, confirm, loginCode, loginConfirm, uhadLogin, uhadForgot, uhadReset };
 }
 
 function createContactRouter(service) {
@@ -146,6 +205,9 @@ function createContactRouter(service) {
   router.post('/current', wrap((req) => service.current(req.body || {})));
   router.post('/code', wrap((req) => service.requestCode(req.body || {})));
   router.post('/confirm', wrap((req) => service.confirm(req.body || {})));
+  router.post('/uhad/login', wrap((req) => service.uhadLogin(req.body || {})));
+  router.post('/uhad/forgot', wrap((req) => service.uhadForgot(req.body || {})));
+  router.post('/uhad/reset', wrap((req) => service.uhadReset(req.body || {})));
   router.post('/login/code', wrap((req) => service.loginCode(req.body || {})));
   router.post('/login/confirm', wrap((req) => service.loginConfirm(req.body || {})));
   return router;
@@ -157,6 +219,9 @@ function supabaseContactStore(sb) {
     getUhad: (id) => one(sb.from('uhads').select('id,name,phone,email').eq('id', id).maybeSingle()),
     getCustomer: (id) => one(sb.from('customers').select('id,name,phone,email,uhad_id').eq('id', id).maybeSingle()),
     findUhadByEmail: (email) => one(sb.from('uhads').select('id').eq('email', email).maybeSingle()),
+    findUhadFull: (email) => one(sb.from('uhads').select('*').eq('email', email).maybeSingle()),
+    // from now on the password is kept only as a hash; the old plain-text column is emptied
+    async setUhadPasswordHash(id, passwordHash) { await one(sb.from('uhads').update({ password_hash: passwordHash, password: null }).eq('id', id)); },
     // stores whose own email was confirmed with a code: the only ones allowed to log in by email
     findStoresByVerifiedEmail: (email) => one(sb.from('customers').select('*, uhads(id, name, company, email)')
       .eq('role', 'uhsa').eq('email', email).not('email_verified_at', 'is', null)),

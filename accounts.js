@@ -5,6 +5,7 @@
 
 const express = require('express');
 const { generatePassword } = require('./engineers');
+const { hashPassword, strongEnough } = require('./passwords');
 
 const ONLINE_MS = 10 * 60 * 1000;
 const httpError = (status, message) => { const e = new Error(message); e.status = status; return e; };
@@ -41,12 +42,13 @@ function createAccountsService(store, { now = () => new Date() } = {}) {
     return { accounts: rows, at: new Date(at).toISOString() };
   }
 
-  async function newPassword(uhadId, actor) {
+  async function newPassword(uhadId, actor, chosen) {
     if (!UUID_RE.test(String(uhadId))) throw httpError(400, 'Invalid account.');
     const u = await store.getUhad(uhadId);
     if (!u) throw httpError(404, 'Account not found.');
-    const password = generatePassword(10);
-    await store.setUhadPassword(uhadId, password);
+    let password = chosen ? String(chosen) : generatePassword(10);
+    if (chosen && !strongEnough(password)) throw httpError(400, 'Use at least 8 characters, with letters and numbers.');
+    await store.setUhadPassword(uhadId, hashPassword(password));
     return { company: u.company, name: u.name, login_email: u.email || null, login_phone: u.phone || null, password, by: actor };
   }
 
@@ -64,7 +66,7 @@ function createAccountsRouter(service) {
   };
   router.get('/', wrap(() => service.list()));
   router.post('/uhad/:id/password', wrap(async (req) => {
-    const out = await service.newPassword(req.params.id, (req.admin && req.admin.email) || 'admin');
+    const out = await service.newPassword(req.params.id, (req.admin && req.admin.email) || 'admin', (req.body || {}).password);
     console.log(`[ACCOUNTS] ${out.by} set a new password for UHAD ${req.params.id}`);
     delete out.by;
     return out;
@@ -82,7 +84,8 @@ function supabaseAccountsStore(sb) {
     },
     listStores: () => one(sb.from('customers').select('id,name,phone,email,uhad_id,device_id,last_seen,account_status,created_at').eq('role', 'uhsa').order('name')),
     getUhad: (id) => one(sb.from('uhads').select('id,name,company,email,phone').eq('id', id).maybeSingle()),
-    async setUhadPassword(id, password) { await one(sb.from('uhads').update({ password }).eq('id', id)); },
+    // only a hash is stored; the plain-text column is emptied
+    async setUhadPassword(id, passwordHash) { await one(sb.from('uhads').update({ password_hash: passwordHash, password: null }).eq('id', id)); },
   };
 }
 

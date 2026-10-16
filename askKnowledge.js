@@ -49,6 +49,11 @@ const KNOWLEDGE = [
     text: 'Stores: open Settings in the app, find "Contact details", tap "Add email" (or "Change email"), type your email and enter the 6-digit code we send to confirm it is yours. Service updates and reports then go to that email. If a store has no email of its own, they go to the company account\'s email. Company accounts: tap the 👤 icon on the home screen to add or change the email, or to change the mobile number (the code goes to your confirmed email). Stores log in with their registered mobile number, or with their confirmed email: tap "Log in with email instead" on the store login screen and enter the 6-digit code sent to that email.',
   },
   {
+    id: 'password', title: 'Forgot password',
+    keywords: ['forgot password', 'forgot my password', 'reset password', 'new password', 'change password', 'password bhul', 'cannot login', 'cant login', "can't login", 'unable to login', 'login problem'],
+    text: 'Company accounts: on the login screen tap "Forgot password?", enter your registered email, then enter the 6-digit code we email you and choose a new password (at least 8 characters, with letters and numbers). Stores log in with their registered mobile number or a confirmed email and a 6-digit code, so they have no password to forget. If you have no email on your account, write to info@prtechno.in or careprtech@hotmail.com and we will help.',
+  },
+  {
     id: 'rating', title: 'Rating a service',
     keywords: ['rate', 'rating', 'star', 'feedback', 'review'],
     text: 'After a service is finished and the report is filed, a "How was your service?" card appears in Service History. Give 1 to 5 stars and an optional comment. One rating per service.',

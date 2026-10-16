@@ -3,6 +3,7 @@
 const assert = require('assert');
 const C = require('../contactApi');
 const A = require('../accounts');
+const PW = require('../passwords');
 const { clock, ok400 } = require('./helpers');
 
 let passed = 0; const results = [];
@@ -25,6 +26,8 @@ function world({ uhadEmail = null, enabled = true } = {}) {
     setStoreEmail: async (id, e) => { db.stores[id].email = e; },
     setUhadEmail: async (id, e) => { db.uhads[id].email = e; },
     setUhadPhone: async (id, p) => { db.uhads[id].phone = p; },
+    findUhadFull: async (e) => Object.values(db.uhads).find(u => u.email === e) || null,
+    setUhadPasswordHash: async (id, h) => { db.uhads[id].password_hash = h; db.uhads[id].password = null; },
     findStoresByVerifiedEmail: async (e) => Object.values(db.stores).filter(x => x.email === e && x.verified),
   };
   const sent = [];
@@ -113,7 +116,7 @@ const U = { kind: 'uhad', id: UHAD, phone: '8888800000' };
     const s1 = out.accounts.find(a => a.id === STORE); const s2 = out.accounts.find(a => a.id === 's2');
     assert.strictEqual(s1.running, 1); assert.strictEqual(s2.running, 0); assert.strictEqual(s2.status, 'Active' === s2.status ? 'x' : 'Removed');
     const np = await svc.newPassword(UHAD, 'admin');
-    assert.match(np.password, /^[A-Za-z0-9]{10}$/); assert.strictEqual(store.last, np.password);
+    assert.match(np.password, /^[A-Za-z0-9]{10}$/); assert.ok(PW.verifyPassword(np.password, store.last), 'stored as a hash'); assert.notStrictEqual(store.last, np.password);
   });
 
   await test('a store logs in with a verified email and a 6-digit code', async () => {
@@ -145,6 +148,50 @@ const U = { kind: 'uhad', id: UHAD, phone: '8888800000' };
     const r = await w.svc.loginCode({ email: 'h@x.test' });
     for (let i = 0; i < 8; i++) await ok400(w.svc.loginConfirm({ email: 'h@x.test', token: r.token, code: String(111110 + i) }), 400);
     await ok400(w.svc.loginConfirm({ email: 'h@x.test', token: r.token, code: '999999' }), 429);
+  });
+
+  await test('company login: hashed passwords work, old plain-text ones work once and are upgraded, wrong ones are refused', async () => {
+    const w = world({ uhadEmail: 'owner@pr.test' });
+    w.db.uhads[UHAD].password = 'OldPass123';                     // legacy plain text
+    await ok400(w.svc.uhadLogin({ email: 'owner@pr.test', password: 'wrong' }), 401, /incorrect/);
+    const r = await w.svc.uhadLogin({ email: 'Owner@PR.test', password: 'OldPass123' });
+    assert.strictEqual(r.uhad.id, UHAD);
+    assert.ok(!('password' in r.uhad) && !('password_hash' in r.uhad), 'no password fields leave the server');
+    assert.ok(w.db.uhads[UHAD].password_hash.startsWith('scrypt$'));
+    assert.strictEqual(w.db.uhads[UHAD].password, null);          // plain text removed after the upgrade
+    await w.svc.uhadLogin({ email: 'owner@pr.test', password: 'OldPass123' });   // still works, now from the hash
+    await ok400(w.svc.uhadLogin({ email: 'nobody@pr.test', password: 'x' }), 401, /incorrect/);
+  });
+
+  await test('forgot password: a code by email, then a new password the customer chooses', async () => {
+    const w = world({ uhadEmail: 'owner@pr.test' });
+    const f = await w.svc.uhadForgot({ email: 'owner@pr.test' });
+    assert.match(w.sent[0].subject, /Reset your AQUIQ password/);
+    await ok400(w.svc.uhadReset({ email: 'owner@pr.test', token: f.token, code: '000000', new_password: 'NewPass2026' }), 400, /not correct/);
+    await ok400(w.svc.uhadReset({ email: 'owner@pr.test', token: f.token, code: codeOf(w.sent[0]), new_password: 'short' }), 400, /8 characters/);
+    await w.svc.uhadReset({ email: 'owner@pr.test', token: f.token, code: codeOf(w.sent[0]), new_password: 'NewPass2026' });
+    const r = await w.svc.uhadLogin({ email: 'owner@pr.test', password: 'NewPass2026' });
+    assert.strictEqual(r.uhad.id, UHAD);
+    await ok400(w.svc.uhadLogin({ email: 'owner@pr.test', password: 'OldPass123' }), 401);
+  });
+
+  await test('forgot password never reveals whether an email exists; codes expire and cannot be guessed', async () => {
+    const w = world({ uhadEmail: 'owner@pr.test' });
+    const a = await w.svc.uhadForgot({ email: 'nobody@x.test' });
+    assert.strictEqual(w.sent.length, 0); assert.ok(a.token);
+    await ok400(w.svc.uhadReset({ email: 'nobody@x.test', token: a.token, code: '123456', new_password: 'NewPass2026' }), 400);
+    const f = await w.svc.uhadForgot({ email: 'owner@pr.test' });
+    const good = codeOf(w.sent[0]);
+    w.c.add(11 * 60);
+    await ok400(w.svc.uhadReset({ email: 'owner@pr.test', token: f.token, code: good, new_password: 'NewPass2026' }), 400, /expired/);
+  });
+
+  await test('password hashing: salted, verifies, rejects wrong, strength rule', async () => {
+    const h1 = PW.hashPassword('Secret123'); const h2 = PW.hashPassword('Secret123');
+    assert.notStrictEqual(h1, h2);
+    assert.ok(PW.verifyPassword('Secret123', h1)); assert.ok(!PW.verifyPassword('secret123', h1));
+    assert.ok(!PW.verifyPassword('x', 'not-a-hash'));
+    assert.ok(PW.strongEnough('abcdefg1') && !PW.strongEnough('abcdefgh') && !PW.strongEnough('a1'));
   });
 
   for (const [s, n] of results) console.log(`${s}  ${n}`);
