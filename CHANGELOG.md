@@ -1,6 +1,9 @@
 # AQUIQ backend — release history
 Series: MAJOR.MINOR.PATCH. MINOR = new feature, PATCH = fix. Current version is also at `GET /version`.
 
+## 1.4.1 — 18 Oct 2026
+- Mail provider `relay` (MAIL_PROVIDER=relay, MAIL_RELAY_URL, MAIL_RELAY_SECRET). App-password spaces ignored.
+
 ## 1.4.0 — 18 Oct 2026
 - Mail providers (SMTP / Brevo / Resend over HTTPS), admin mail test. Map card rules (accepted → work done). App version reporting + latest-version list (versions.js). Migration section 11.
 
