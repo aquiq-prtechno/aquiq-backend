@@ -253,7 +253,8 @@ function createMailer(env = process.env, http = require('axios')) {
       const nodemailer = require('nodemailer');
       const port = Number(env.MAIL_PORT) || 465;
       transport = nodemailer.createTransport({
-        host: env.MAIL_HOST || 'smtp.gmail.com', port, secure: port === 465, auth: { user: env.MAIL_USER, pass: env.MAIL_PASS },
+        host: env.MAIL_HOST || 'smtp.gmail.com', port, secure: port === 465,
+        auth: { user: String(env.MAIL_USER).trim(), pass: String(env.MAIL_PASS).replace(/\s+/g, '') },   // Google shows app passwords in groups with spaces
         connectionTimeout: 15000, greetingTimeout: 15000, socketTimeout: 20000,
       });
     }
