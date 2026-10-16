@@ -44,6 +44,11 @@ const KNOWLEDGE = [
     text: 'AQUIQ emails you at each step, to the email your AQUIQ account is registered with: when your request is received (with your ticket number), when an engineer is assigned (with their name and expected time), if the engineer is running late, when the work is finished and needs your approval, if you say you are not satisfied and the job is reopened, and finally with the service report PDF when the service is complete. You can also follow everything live in the app.',
   },
   {
+    id: 'contact', title: 'Changing your email or mobile number',
+    keywords: ['change email', 'add email', 'my email', 'email id', 'change mobile', 'change number', 'change phone', 'mobile number', 'update email', 'which email', 'email address', 'contact details', 'profile'],
+    text: 'Stores: open Settings in the app, find "Contact details", tap "Add email" (or "Change email"), type your email and enter the 6-digit code we send to confirm it is yours. Service updates and reports then go to that email. If a store has no email of its own, they go to the company account\'s email. Company accounts: tap the 👤 icon on the home screen to add or change the email, or to change the mobile number (the code goes to your confirmed email). Stores log in with their registered mobile number.',
+  },
+  {
     id: 'rating', title: 'Rating a service',
     keywords: ['rate', 'rating', 'star', 'feedback', 'review'],
     text: 'After a service is finished and the report is filed, a "How was your service?" card appears in Service History. Give 1 to 5 stars and an optional comment. One rating per service.',
