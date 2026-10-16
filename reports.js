@@ -545,7 +545,9 @@ function supabaseReportStore(sb) {
     },
     // The customer's login email lives on the uhads (account) row that owns the store.
     async getCustomerEmail(customerId) {
-      const c = await one(sb.from('customers').select('uhad_id').eq('id', customerId).maybeSingle());
+      // the store's own confirmed email first, then the email of the company account that owns it
+      const c = await one(sb.from('customers').select('uhad_id,email').eq('id', customerId).maybeSingle());
+      if (c && c.email) return c.email;
       if (!c || !c.uhad_id) return null;
       const u = await one(sb.from('uhads').select('email').eq('id', c.uhad_id).maybeSingle());
       return u && u.email ? u.email : null;

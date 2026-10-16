@@ -62,3 +62,7 @@ alter table engineers add column if not exists sop_accepted_at timestamptz;
 alter table service_reports add column if not exists rating int;
 alter table service_reports add column if not exists rating_comment text;
 alter table service_reports add column if not exists rated_at timestamptz;
+
+-- 9) A store can add its own email (confirmed with a code) so service updates and reports reach it.
+alter table customers add column if not exists email text;
+alter table customers add column if not exists email_verified_at timestamptz;

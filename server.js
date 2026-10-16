@@ -1235,6 +1235,16 @@ cron.schedule('30 21 * * *', async () => {            // 03:00 IST
   } catch (err) { console.error('[RETENTION]', err.message); }
 });
 
+// Customer contact details (email for updates, mobile number) edited from the customer app's Settings.
+const contactApi = require('./contactApi');
+app.use('/customer/contact', contactApi.createContactRouter(
+  contactApi.createContactService(contactApi.supabaseContactStore(supabase), sharedMailer)));
+
+// Admin: all accounts (UHAD + stores) with status; passwords are never shown, only reset.
+const accountsApi = require('./accounts');
+app.use('/admin/accounts', accountsApi.createAccountsRouter(
+  accountsApi.createAccountsService(accountsApi.supabaseAccountsStore(supabase))));
+
 // The engineer app (AQUIQ SE-TECH). Not under /admin: it has its own sign-in rules.
 const engineerApi = require('./engineerApi');
 app.use('/engineer', engineerApi.createEngineerApiRouter({
