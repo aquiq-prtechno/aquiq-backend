@@ -1,6 +1,9 @@
 # AQUIQ backend — release history
 Series: MAJOR.MINOR.PATCH. MINOR = new feature, PATCH = fix. Current version is also at `GET /version`.
 
+## 1.5.0 — 19 Oct 2026
+- Customer can cancel a request until the engineer arrives (POST /customer/service-request/cancel). Ticket closes, engineer gets a push, customer gets an email with the care team in CC.
+
 ## 1.4.3 — 16 Oct 2026
 - Care team is now in CC on every customer email (replaces the separate team emails). No email when an engineer is assigned or when work is finished. Customers with no email: the care team still gets a flagged copy.
 

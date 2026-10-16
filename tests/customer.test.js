@@ -168,6 +168,32 @@ const ASK = { store_id: CUST, phone: '99999 00000', issue_category: 'Low or no w
     assert.strictEqual(h[0].report_no, `FSR-${h[0].ticket_no}`);
   });
 
+  await test('a customer can cancel before the engineer arrives; the ticket closes and a new request is allowed', async () => {
+    const w = world();
+    const eng = await w.es.register({ name: 'Ravi', phone: '9876543210', pincode: '122001', id_proof_type: 'pan', id_proof_ref: 'ABCDE1234F' }, ADMIN);
+    const a = await w.cs.request(ASK);
+    assert.strictEqual(a.ticket.can_cancel, true);
+    await w.ts.act(a.ticket.id, { action: 'accept', engineer_id: eng.id, eta_minutes: 30 }, ADMIN);
+    const out = await w.cs.cancel({ ...ASK, ticket_id: a.ticket.id, reason: 'Fixed it myself' });
+    assert.strictEqual(out.ticket.status, 'cancelled'); assert.strictEqual(out.ticket.active, false);
+    assert.match(w.store.tickets[0].closed_reason, /Cancelled by customer: Fixed it myself/);
+    const b = await w.cs.request(ASK);
+    assert.strictEqual(b.already_open, false, 'a fresh request is allowed after cancelling');
+    assert.strictEqual((await w.ts.engineerJobs(await w.store.getEngineer(eng.id))).offers.length, 1, 'only the new one is on offer');
+  });
+
+  await test('cancel is refused once the engineer has arrived, and for someone else\'s request', async () => {
+    const w = world();
+    const eng = await w.es.register({ name: 'Ravi', phone: '9876543210', pincode: '122001', id_proof_type: 'pan', id_proof_ref: 'ABCDE1234F' }, ADMIN);
+    const a = await w.cs.request(ASK);
+    await w.ts.act(a.ticket.id, { action: 'accept', engineer_id: eng.id, eta_minutes: 30 }, ADMIN);
+    await w.ts.engineerAct(await w.store.getEngineer(eng.id), a.ticket.id, { action: 'arrive', lat: 28.45, lng: 77.02 });
+    await ok400(w.cs.cancel({ ...ASK, ticket_id: a.ticket.id }), 409, /already reached/);
+    const list = await w.cs.list(ASK);
+    assert.strictEqual(list.tickets[0].can_cancel, false);
+    await ok400(w.cs.cancel({ ...ASK, phone: '88888 00000', ticket_id: a.ticket.id }), 401, /verify/);
+  });
+
   for (const [s, n] of results) console.log(`${s}  ${n}`);
   const failed = results.filter(r => r[0] === 'FAIL').length;
   console.log(failed ? `\n${failed} FAILED, ${passed} passed` : `\nALL ${passed} PASSED`);

@@ -78,6 +78,7 @@ function createCustomerService(store, tickets, { now = () => new Date(), reports
       closed_at: t.closed_at || null,
       eta_at: t.status === 'accepted' ? t.eta_at : null,
       active: !TERMINAL.includes(t.status),
+      can_cancel: ['open', 'accepted', 'reopened'].includes(t.status),   // not once the engineer has reached the site
       can_respond: t.status === 'work_done',          // the customer may approve or say not satisfied
       engineer_location: trackOf(t),
     };
@@ -151,6 +152,18 @@ function createCustomerService(store, tickets, { now = () => new Date(), reports
     return { ticket: view(out) };
   }
 
+  async function cancel(input) {
+    const c = await who(input);
+    const t = await ownTicket(c, input.ticket_id);
+    if (TERMINAL.includes(t.status)) throw httpError(409, 'This request is already finished.');
+    if (!['open', 'accepted', 'reopened'].includes(t.status)) {
+      throw httpError(409, 'The engineer has already reached your site or finished the work, so it can no longer be cancelled here. Please call AQUIQ support.');
+    }
+    const reason = clean(input.reason, 300);
+    const out = await tickets.act(t.id, { action: 'customer_cancel', note: reason }, { email: `customer: ${c.name || c.id}`, role: 'customer' });
+    return { ticket: view(out) };
+  }
+
   async function rate(input) {
     const c = await who(input);
     const t = await ownTicket(c, input.ticket_id);
@@ -221,7 +234,7 @@ function createCustomerService(store, tickets, { now = () => new Date(), reports
     return { answer: out.answer, mode: out.mode };
   }
 
-  return { request, list, approve, notSatisfied, report, rate, visits, exportLink, buildExport, ask: askQuestion };
+  return { request, list, approve, notSatisfied, cancel, report, rate, visits, exportLink, buildExport, ask: askQuestion };
 }
 
 function createCustomerRouter(service) {
@@ -237,6 +250,7 @@ function createCustomerRouter(service) {
   router.post('/service-requests', wrap((req) => service.list(req.body || {})));
   router.post('/service-request/approve', wrap((req) => service.approve(req.body || {})));
   router.post('/service-request/not-satisfied', wrap((req) => service.notSatisfied(req.body || {})));
+  router.post('/service-request/cancel', wrap((req) => service.cancel(req.body || {})));
   router.post('/service-request/report', wrap((req) => service.report(req.body || {})));
   router.post('/service-request/rate', wrap((req) => service.rate(req.body || {})));
   router.post('/ask', wrap((req) => service.ask(req.body || {})));

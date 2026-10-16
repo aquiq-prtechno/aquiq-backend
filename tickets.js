@@ -66,11 +66,11 @@ const TERMINAL = ['closed', 'cancelled'];
 
 // action -> status it leads to, per current status
 const TRANSITIONS = {
-  open:      { accept: 'accepted', cancel: 'cancelled' },
-  accepted:  { arrive: 'arrived', reassign: 'accepted', drop: 'open', cancel: 'cancelled' },
+  open:      { accept: 'accepted', cancel: 'cancelled', customer_cancel: 'cancelled' },
+  accepted:  { arrive: 'arrived', reassign: 'accepted', drop: 'open', cancel: 'cancelled', customer_cancel: 'cancelled' },
   arrived:   { work_done: 'work_done', reassign: 'accepted', drop: 'open', cancel: 'cancelled' },
   work_done: { approve: 'approved', approve_on_behalf: 'approved', engineer_override: 'approved', not_satisfied: 'reopened', cancel: 'cancelled' },
-  reopened:  { accept: 'accepted', cancel: 'cancelled' },
+  reopened:  { accept: 'accepted', cancel: 'cancelled', customer_cancel: 'cancelled' },
   approved:  { close: 'closed' },
   closed:    {},
   cancelled: {},
@@ -88,6 +88,7 @@ const ACTIONS = {
   drop:              { label: 'Engineer dropped / unable', needsNote: true },
   close:             { label: 'Close ticket' },
   cancel:            { label: 'Cancel ticket', needsNote: true },
+  customer_cancel:   { label: 'Customer cancelled the request', customerOnly: true },
   note:              { label: 'Add note', needsNote: true },
 };
 
@@ -338,6 +339,7 @@ function createTicketService(store, { now = () => new Date(), push = null, mail 
         patch.open_since = iso; break;
       case 'close':             patch.closed_at = iso; patch.closed_reason = note || null; break;
       case 'cancel':            patch.closed_at = iso; patch.closed_reason = note; break;
+      case 'customer_cancel':   patch.closed_at = iso; patch.closed_reason = note ? `Cancelled by customer: ${note}` : 'Cancelled by customer'; break;
       default: break;
     }
 
@@ -360,11 +362,13 @@ function createTicketService(store, { now = () => new Date(), push = null, mail 
       if (action === 'accept' || action === 'reassign') mail.assigned(updated);
       if (action === 'work_done') mail.workDone(updated);
       if (action === 'not_satisfied') mail.reopened(updated);
+      if (action === 'customer_cancel') mail.cancelled(updated);
     }
     if (push && actor.role !== 'engineer') {
       if (action === 'accept' || action === 'reassign') push.assigned(updated, updated.engineer_id);
     }
     if (push && action === 'not_satisfied' && updated.engineer_id) push.reopened(updated, updated.engineer_id);
+    if (push && action === 'customer_cancel' && updated.engineer_id) push.cancelled(updated, updated.engineer_id);
     return decorate(updated, at, ctx.of(updated));
   }
 

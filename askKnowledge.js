@@ -9,6 +9,11 @@ const KNOWLEDGE = [
     text: 'AQUIQ monitors your RO water purifier all day: TDS, membrane health, pump, flow and more. It alerts you when something needs attention, prepares monthly reports, lets you request a service engineer in the app, and answers your questions here in Ask AQUIQ.',
   },
   {
+    id: 'cancel', title: 'Cancelling a service request',
+    keywords: ['cancel', 'cancel request', 'cancel order', 'cancel service', 'cancel complaint', 'cancel ticket', 'withdraw', 'dont need', 'don\'t need', 'changed my mind', 'not needed', 'stop request'],
+    text: 'To cancel, open the app, go to Request Service and tap "Cancel request" at the bottom of the card, then confirm. You can cancel while the request is waiting for an engineer or the engineer is on the way. The engineer is told at once and you get a confirmation email. Once the engineer has reached your site or finished the work it can no longer be cancelled in the app, so please call AQUIQ support. After cancelling you can raise a new request any time.',
+  },
+  {
     id: 'request', title: 'How to request a service',
     keywords: ['request', 'book', 'service', 'complaint', 'raise', 'ticket', 'engineer bulana', 'problem', 'issue', 'how do i request', 'how to request', 'how to book'],
     text: 'Open the app, go to your store, then Service History, and tap "Request Service". Choose the problem, write a few words about it, mark it urgent only if there is no water, and send. You get a ticket number straight away (it starts with PMR). Registered AQUIQ engineers near you are alerted; the first to accept is assigned, and you can see the engineer\'s name and expected arrival time in the same card. You can have one open request at a time, and up to 5 requests a day.',
@@ -41,7 +46,7 @@ const KNOWLEDGE = [
   {
     id: 'emails', title: 'Emails you receive',
     keywords: ['email', 'mail', 'emails', 'notification', 'notify', 'inform', 'update me', 'inbox', 'get an email', 'get email', 'send email', 'email me', 'mail me', 'by email', 'on email'],
-    text: 'AQUIQ emails you at the key moments, to the email your AQUIQ account is registered with: when your request is received (with your ticket number), if the engineer is running late, if you say you are not satisfied and the job is reopened, and finally with the service report PDF once you have approved the work. The AQUIQ care team is copied on these emails. When an engineer is assigned and when the work is finished you are told in the app (and by notification) rather than by email. You can follow everything live in the app.',
+    text: 'AQUIQ emails you at the key moments, to the email your AQUIQ account is registered with: when your request is received (with your ticket number), if the engineer is running late, if you say you are not satisfied and the job is reopened, when you cancel a request, and finally with the service report PDF once you have approved the work. The AQUIQ care team is copied on these emails. When an engineer is assigned and when the work is finished you are told in the app (and by notification) rather than by email. You can follow everything live in the app.',
   },
   {
     id: 'contact', title: 'Changing your email or mobile number',
@@ -66,7 +71,7 @@ const KNOWLEDGE = [
   {
     id: 'whatsnew', title: 'Recent updates',
     keywords: ['new', 'update', 'updates', 'feature', 'features', 'changed', 'latest', 'recent', 'added', 'kya naya'],
-    text: 'Recent updates to AQUIQ (October 2026): you can now Request Service inside the app and see the status live; you can track your engineer with an arrival time and a map; you can approve the finished work or tell us what is still wrong; every service has a PDF report with the AQUIQ letterhead; the Visit Log shows each visit in one line and can be downloaded as Excel or PDF; you can rate each service from 1 to 5 stars; and you also get an email when your request is received, if the engineer is late, if a job is reopened, and with the final report; and a "What\'s new" note appears after every update. Earlier (August 2026): monthly reports in PDF and Excel, predictive maintenance alerts, and Ask AQUIQ.',
+    text: 'Recent updates to AQUIQ (October 2026): you can now Request Service inside the app and see the status live; you can track your engineer with an arrival time and a map; you can approve the finished work or tell us what is still wrong; every service has a PDF report with the AQUIQ letterhead; the Visit Log shows each visit in one line and can be downloaded as Excel or PDF; you can rate each service from 1 to 5 stars; and you also get an email when your request is received, if the engineer is late, if a job is reopened, and with the final report; and you can cancel a request until the engineer arrives; and a "What\'s new" note appears after every update. Earlier (August 2026): monthly reports in PDF and Excel, predictive maintenance alerts, and Ask AQUIQ.',
   },
   {
     id: 'support', title: 'Contact and support',

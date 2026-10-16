@@ -1274,7 +1274,7 @@ app.post('/admin/mail-test', express.json(), async (req, res) => {
 
 // Public: which release of the AQUIQ server is running (matches package.json and CHANGELOG.md)
 app.get('/version', (_req, res) => {
-  res.json({ name: 'AQUIQ backend', version: require('./package.json').version, released: '17 Oct 2026', latest_apps: require('./versions').LATEST });
+  res.json({ name: 'AQUIQ backend', version: require('./package.json').version, released: '19 Oct 2026', latest_apps: require('./versions').LATEST });
 });
 
 // ─── Start Server ─────────────────────────────────────────────────────────────

@@ -60,6 +60,11 @@ function createPushService(store, { send, enabled = true, log = console } = {}) 
       title: 'Customer is not satisfied', body: `${ticket.ticket_no} needs another visit`,
       ticket_id: ticket.id, ticket_no: ticket.ticket_no, kind: 'reopened',
     })),
+    // customer cancelled the request: tell the engineer who had it
+    cancelled: (ticket, engineerId) => safe(toEngineers([engineerId], {
+      title: 'Job cancelled by the customer', body: `${ticket.ticket_no} no longer needs a visit`,
+      ticket_id: ticket.id, ticket_no: ticket.ticket_no, kind: 'cancelled',
+    })),
   };
 }
 

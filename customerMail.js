@@ -35,6 +35,8 @@ function createCustomerMailer(store, mailer, { log = console } = {}) {
     delayed: (t) => send(t, `Update on your service request ${no(t)}`,
       `Your engineer${t.engineer_name ? ` ${t.engineer_name}` : ''} is running late for request ${no(t)}${t.eta_at ? ` (promised by ${timeOf(t.eta_at)})` : ''}. We are sorry for the delay and are following it up. Please check the AQUIQ app for the latest arrival time.`),
     workDone: none, // no email when work is finished; the report email follows after approval
+    cancelled: (t) => send(t, `Service request ${no(t)} cancelled`,
+      `As you asked, your service request ${no(t)} (${t.issue_category}) has been cancelled. No engineer will visit for it. If you still need help, you can raise a new request in the AQUIQ app at any time.`),
     reopened: (t) => send(t, `We are sorry – your service ${no(t)} is reopened`,
       `Thank you for telling us the work was not satisfactory. Your request ${no(t)} has been reopened and an engineer will come back to fix it. We will keep you updated.`),
   };
