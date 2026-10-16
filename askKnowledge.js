@@ -10,7 +10,7 @@ const KNOWLEDGE = [
   },
   {
     id: 'request', title: 'How to request a service',
-    keywords: ['request', 'book', 'service', 'complaint', 'raise', 'ticket', 'engineer bulana', 'problem', 'issue', 'how to'],
+    keywords: ['request', 'book', 'service', 'complaint', 'raise', 'ticket', 'engineer bulana', 'problem', 'issue', 'how do i request', 'how to request', 'how to book'],
     text: 'Open the app, go to your store, then Service History, and tap "Request Service". Choose the problem, write a few words about it, mark it urgent only if there is no water, and send. You get a ticket number straight away (it starts with PMR). Registered AQUIQ engineers near you are alerted; the first to accept is assigned, and you can see the engineer\'s name and expected arrival time in the same card. You can have one open request at a time, and up to 5 requests a day.',
   },
   {
