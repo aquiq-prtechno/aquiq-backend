@@ -54,6 +54,20 @@ const ASK = { store_id: CUST, phone: '9999900000', issue_category: 'Low or no wa
     assert.match(sent[1].text, /running late/); assert.match(sent[1].text, /Promised by:/);
     assert.match(sent[2].text, /reopened/); assert.match(sent[3].subject, /cancelled/); assert.match(sent[3].text, /no engineer will visit/);
   });
+  await test('sender addresses: ticket mails use the tickets address, reports use the reports address, replies go to care', async () => {
+    const R = require('../reports');
+    const calls = [];
+    const http = { post: async (url, body) => { calls.push(body); return {}; } };
+    const mailer = R.createMailer({ MAIL_PROVIDER: 'relay', MAIL_RELAY_URL: 'https://x/api', MAIL_RELAY_SECRET: 's', MAIL_FROM_TICKETS: 'r-tickets@aq.test', MAIL_FROM_REPORTS: 'reports@aq.test', MAIL_REPLY_TO: 'care@aq.test', REPORT_COPY_TO: 'team@aq.test' }, http);
+    const store = { getCustomerEmail: async () => 'c@x.test' };
+    const t = { ticket_no: 'PMR1', contact_person: 'A', customer_id: 'c1', issue_category: 'Leak', created_at: '2026-10-16T06:00:00Z' };
+    await M.createCustomerMailer(store, mailer).created(t);
+    assert.deepStrictEqual(calls[0].from, { address: 'r-tickets@aq.test', name: 'AQUIQ Service Desk' });
+    assert.strictEqual(calls[0].replyTo, 'care@aq.test');
+    assert.deepStrictEqual(mailer.senderFor('reports'), { address: 'reports@aq.test', name: 'AQUIQ Reports' });
+    const plain = R.createMailer({ MAIL_PROVIDER: 'relay', MAIL_RELAY_URL: 'https://x/api', MAIL_RELAY_SECRET: 's' }, http);
+    assert.strictEqual(plain.senderFor('tickets'), null, 'no sender configured = relay default');
+  });
   await test('relay mode: the message goes to the relay over HTTPS with the secret and a base64 attachment', async () => {
     const R = require('../reports');
     const calls = [];

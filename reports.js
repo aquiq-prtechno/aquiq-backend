@@ -231,19 +231,31 @@ function createMailer(env = process.env, http = require('axios')) {
   let transport = null;
   const list = (v) => (v == null ? [] : Array.isArray(v) ? v : [v]);
 
-  async function send({ to, cc, subject, text, html, attachments }) {
+  // Different kinds of mail can go out from different addresses (aliases of the one mailbox):
+  // MAIL_FROM_TICKETS (ticket mails) and MAIL_FROM_REPORTS (closing mail + report PDF). MAIL_REPLY_TO is where replies go.
+  const senderCfg = {
+    tickets: { address: env.MAIL_FROM_TICKETS, name: env.MAIL_NAME_TICKETS || 'AQUIQ Service Desk' },
+    reports: { address: env.MAIL_FROM_REPORTS, name: env.MAIL_NAME_REPORTS || 'AQUIQ Reports' },
+  };
+  const senderFor = (kind) => { const s = senderCfg[kind]; return s && s.address ? { address: String(s.address).trim(), name: s.name } : null; };
+  const defaultReplyTo = env.MAIL_REPLY_TO ? String(env.MAIL_REPLY_TO).trim() : null;
+
+  async function send({ to, cc, subject, text, html, attachments, from, replyTo }) {
     if (!enabled) throw httpError(503, 'Mail is not set up.');
+    replyTo = replyTo || defaultReplyTo || undefined;
     if (provider === 'relay') {
       // hand the message to the AQUIQ mail relay over HTTPS (it sends through Gmail)
       await http.post(env.MAIL_RELAY_URL, {
         to: list(to), ...(list(cc).length ? { cc: list(cc) } : {}), subject, text, ...(html ? { html } : {}),
+        ...(from ? { from } : {}), ...(replyTo ? { replyTo } : {}),
         ...(attachments && attachments.length ? { attachments: attachments.map(a => ({ filename: a.filename, content: Buffer.from(a.content).toString('base64') })) } : {}),
       }, { headers: { Authorization: `Bearer ${env.MAIL_RELAY_SECRET}`, 'content-type': 'application/json' }, timeout: 25000, maxBodyLength: 6 * 1024 * 1024 });
       return;
     }
     if (provider === 'brevo') {
       await http.post('https://api.brevo.com/v3/smtp/email', {
-        sender: { name: fromName, email: fromAddr },
+        sender: from ? { name: from.name, email: from.address } : { name: fromName, email: fromAddr },
+        ...(replyTo ? { replyTo: { email: replyTo } } : {}),
         to: list(to).map(email => ({ email })),
         ...(list(cc).length ? { cc: list(cc).map(email => ({ email })) } : {}),
         subject, textContent: text, ...(html ? { htmlContent: html } : {}),
@@ -253,7 +265,7 @@ function createMailer(env = process.env, http = require('axios')) {
     }
     if (provider === 'resend') {
       await http.post('https://api.resend.com/emails', {
-        from: `${fromName} <${fromAddr}>`, to: list(to), ...(list(cc).length ? { cc: list(cc) } : {}), subject, text, ...(html ? { html } : {}),
+        from: from ? `${from.name} <${from.address}>` : `${fromName} <${fromAddr}>`, ...(replyTo ? { reply_to: replyTo } : {}), to: list(to), ...(list(cc).length ? { cc: list(cc) } : {}), subject, text, ...(html ? { html } : {}),
         ...(attachments && attachments.length ? { attachments: attachments.map(a => ({ filename: a.filename, content: Buffer.from(a.content).toString('base64') })) } : {}),
       }, { headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, 'content-type': 'application/json' }, timeout: 20000 });
       return;
@@ -267,12 +279,13 @@ function createMailer(env = process.env, http = require('axios')) {
         connectionTimeout: 15000, greetingTimeout: 15000, socketTimeout: 20000,
       });
     }
-    await transport.sendMail({ from: `"${fromName}" <${fromAddr}>`, to, cc, subject, text, html, attachments });
+    await transport.sendMail({ from: from ? `"${from.name}" <${from.address}>` : `"${fromName}" <${fromAddr}>`, replyTo, to, cc, subject, text, html, attachments });
   }
 
   return {
     enabled, provider, from: fromAddr || (provider === 'relay' ? 'the AQUIQ Gmail account (via relay)' : null),
     copyTo: env.REPORT_COPY_TO || 'careprtech@hotmail.com',
+    senderFor, replyTo: defaultReplyTo,
     send,
   };
 }
@@ -498,6 +511,7 @@ function createReportService(store, tickets, { now = () => new Date(), mailer, f
       try {
         await mail.send({
           to: to.length ? to : copy, cc: to.length && copy ? copy : undefined,
+          from: mail.senderFor ? mail.senderFor('reports') : undefined,
           ...buildReportMail(t, row, full.engineer_name || t.engineer_name),
           attachments: [{ filename: `${row.report_no}.pdf`, content: pdf, contentType: 'application/pdf' }],
         });

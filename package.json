@@ -1,6 +1,6 @@
 {
   "name": "aquiq-backend",
-  "version": "1.5.2",
+  "version": "1.5.3",
   "description": "AQUIQ RO Monitoring Backend \u2014 PR TECHNO",
   "main": "server.js",
   "scripts": {

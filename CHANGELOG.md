@@ -1,6 +1,9 @@
 # AQUIQ backend — release history
 Series: MAJOR.MINOR.PATCH. MINOR = new feature, PATCH = fix. Current version is also at `GET /version`.
 
+## 1.5.3 — 22 Oct 2026
+- Mail can go out from different addresses: MAIL_FROM_TICKETS (request received / late / reopened / cancelled), MAIL_FROM_REPORTS (closing mail + report PDF), MAIL_REPLY_TO. Nothing changes until these Railway variables are set.
+
 ## 1.5.2 — 19 Oct 2026
 - Request received, engineer late, reopened and cancelled emails now use the same AQUIQ layout as the service report (own wording for each, HTML + plain text).
 

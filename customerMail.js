@@ -46,8 +46,9 @@ function createCustomerMailer(store, mailer, { log = console } = {}) {
       const copy = mailer.copyTo || null;
       if (!to && !copy) return { sent: false };
       const { text, html } = buildNotice({ ticket, paragraphs: [].concat(paragraphs), details: details || [] });
-      if (to) await mailer.send({ to, cc: copy && copy.toLowerCase() !== to ? copy : undefined, subject, text, html });
-      else await mailer.send({ to: copy, subject: `[AQUIQ team – customer has no email] ${subject}`, text, html });
+      const from = mailer.senderFor ? mailer.senderFor('tickets') : undefined;
+      if (to) await mailer.send({ to, cc: copy && copy.toLowerCase() !== to ? copy : undefined, subject, text, html, from });
+      else await mailer.send({ to: copy, subject: `[AQUIQ team – customer has no email] ${subject}`, text, html, from });
       return { sent: !!to };
     } catch (e) { log.error('[MAIL]', ticket.ticket_no, e.message); return { sent: false }; }
   }
