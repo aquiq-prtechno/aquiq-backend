@@ -6,7 +6,7 @@ Do these in your **Work** Chrome profile, signed in as `service.bharat@aquiq-prs
 2. **Make a secret.** In Terminal: `openssl rand -hex 32` and copy it. Never paste it in chat.
 3. **Railway** → service web → Variables → New Variable: `INBOUND_SECRET` = that secret → Deploy.
 4. **Gmail filter.** Gmail → Settings (gear) → See all settings → *Filters and Blocked Addresses* → *Create a new filter*.
-   - **To:** `r-tickets@aquiq-prsons.com` → *Create filter* → tick **Apply the label** → *New label…* → name it `r-tickets` → *Create filter*.
+   - **To:** `r-tickets@aquiq-prsons.com` → *Create filter* → tick **Apply the label** → *New label…* → name it `RT-Aquiq` (the script uses this exact name) → *Create filter*.
 5. **The script.** Go to script.google.com → *New project* → delete the sample code → paste the whole of `tools/inbound-gmail.gs` → Save (name it "AQUIQ inbound").
 6. **Script secret.** In the script: ⚙ *Project Settings* → *Script Properties* → *Add script property*: name `INBOUND_SECRET`, value = the same secret → Save.
 7. **Allow it.** Select the function `processRTickets` at the top → *Run*. Google asks for permission (Gmail + "connect to an external service") → Review permissions → choose the account → *Advanced* → *Go to AQUIQ inbound (unsafe)* → Allow. (It says "unsafe" only because you wrote it yourself.)
