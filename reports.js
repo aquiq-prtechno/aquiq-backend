@@ -312,10 +312,10 @@ function buildReportMail(t, row) {
     '--------------------------------------------------', CM.FOOTER_TEXT,
   ].join('\n');
   const esc = CM.esc;
-  const html = `<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.6;max-width:680px">
+  const html = `<div style="font-family:Calibri,Arial,Helvetica,sans-serif;font-size:11pt;line-height:1.5;max-width:680px">
 <p style="margin:0">Greetings of the day!</p>
 <p style="margin:0 0 22px"><b>AQUIQ by PR</b></p>
-<p style="margin:0 0 22px;font-size:17px"><b>STATUS : SOLVED/CLOSED</b></p>
+<p style="margin:0 0 22px"><b>STATUS : SOLVED/CLOSED</b></p>
 <p style="margin:0 0 22px">Your service/complaint/installation &ldquo;${esc(shown)}&rdquo; has been closed with us via reference/ticket Id # <b><i><u>${esc(t.ticket_no)}</u></i></b></p>
 <p style="margin:0 0 14px">Respected Sir/Ma&#39;am ${esc(name)},</p>
 <p style="margin:0 0 14px">The reported issue/request has been successfully completed and verified. No pending actions remain from the HELPDESK team. The ticket is hereby marked as <b>CLOSED</b>.</p>

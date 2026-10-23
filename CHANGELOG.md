@@ -1,6 +1,9 @@
 # AQUIQ backend — release history
 Series: MAJOR.MINOR.PATCH. MINOR = new feature, PATCH = fix. Current version is also at `GET /version`.
 
+## 1.6.2 — 23 Oct 2026
+- Mail body font: Calibri 11 pt for all ticket and closing mails (the support footer stays in code font). /admin/mail-status also reports which address sends ticket mails, report mails and where replies go.
+
 ## 1.6.1 — 23 Oct 2026
 - Closing mail (with the service report PDF) in the AQUIQ format: subject "REF/TIC CLOSED : FSR-<PMR> – <problem>", STATUS : SOLVED/CLOSED, "Respected Sir/Ma'am", code-font support footer. Sent from info.fs.reports-no-reply@ (needs that address in Gmail "Send mail as").
 

@@ -1259,7 +1259,9 @@ ticketsModule.startTicketWatcher(ticketService, cron);
 
 // Admin: is email working? Sends a real test message and returns the exact error if it fails.
 app.get('/admin/mail-status', (_req, res) => {
-  res.json({ enabled: sharedMailer.enabled, provider: sharedMailer.provider, from: sharedMailer.from, copy_to: sharedMailer.copyTo });
+  const sf = (k) => { const s = sharedMailer.senderFor && sharedMailer.senderFor(k); return s ? s.address : null; };
+  res.json({ enabled: sharedMailer.enabled, provider: sharedMailer.provider, from: sharedMailer.from, copy_to: sharedMailer.copyTo,
+    tickets_from: sf('tickets'), reports_from: sf('reports'), reply_to: sharedMailer.replyTo || null });
 });
 app.post('/admin/mail-test', express.json(), async (req, res) => {
   const to = String((req.body || {}).to || '').trim().toLowerCase();

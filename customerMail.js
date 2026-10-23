@@ -20,8 +20,8 @@ function buildNotice({ ticket, paragraphs, details = [] }) {
     'Team: AQUIQ-SERVICE DESK', '', 'Regards,', 'AQUIQ SERVICE-DESK', '',
     '--------------------------------------------------', FOOTER_TEXT,
   ].join('\n');
-  const html = `<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.6;max-width:640px">
-<p style="margin:0 0 18px;font-size:18px;font-weight:bold;letter-spacing:.5px">AQUIQ</p>
+  const html = `<div style="font-family:Calibri,Arial,Helvetica,sans-serif;font-size:11pt;line-height:1.5;max-width:640px">
+<p style="margin:0 0 18px;font-weight:bold">AQUIQ</p>
 <p style="margin:0 0 4px"><b>Ticket ID:</b> ${esc(ticket.ticket_no)}</p>
 ${details.map(([k, v]) => `<p style="margin:0 0 4px"><b>${esc(k)}:</b> ${esc(v)}</p>`).join('\n')}
 <p style="margin:18px 0 14px">Hey ${esc(name)},</p>
@@ -59,7 +59,7 @@ function buildReceived(t) {
     'Regards,', '', 'AQUIQ SERVICE DESK', '',
     '--------------------------------------------------', FOOTER_TEXT,
   ].join('\n');
-  const html = `<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.6;max-width:680px">
+  const html = `<div style="font-family:Calibri,Arial,Helvetica,sans-serif;font-size:11pt;line-height:1.5;max-width:680px">
 ${t.unverified ? `<p style="margin:0 0 14px;font-weight:bold;color:#b00020">${UNVERIFIED}</p>` : ''}
 <p style="margin:0">Greetings of the day!</p>
 <p style="margin:0 0 18px"><b>AQUIQ by PR</b></p>
