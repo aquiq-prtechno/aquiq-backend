@@ -62,7 +62,7 @@ const TOKEN = (n) => `ExponentPushToken[token-number-${n}]`;
     assert.strictEqual(sent.length, 0);
   });
 
-  await test('assigning by admin pushes to that engineer; reopening pushes to the same engineer', async () => {
+  await test('assigning by admin pushes to that engineer; a reopened job is NOT pushed, offered or takeable until the admin assigns', async () => {
     const { store, ts, es, sent } = world();
     const e = await reg(es, 'Ravi');
     await store.upsertDevice({ token: TOKEN(1), engineer_id: e.id });
@@ -77,7 +77,13 @@ const TOKEN = (n) => `ExponentPushToken[token-number-${n}]`;
     sent.length = 0;
     await ts.act(t.id, { action: 'not_satisfied', note: 'still leaking' }, ADMIN);
     await tick();
-    assert.strictEqual(sent.length, 1); assert.match(sent[0].title, /not satisfied/);
+    assert.strictEqual(sent.length, 0, 'no push to anyone when the customer is not satisfied');
+    assert.strictEqual((await ts.engineerJobs(eng)).offers.length, 0, 'not offered');
+    assert.strictEqual((await ts.engineerJobs(eng)).mine.length, 0, 'the old engineer no longer sees it');
+    const other = await reg(es, 'Meera', { phone: '9811111111', ref: 'FGHIJ5678K' });
+    await assert.rejects(async () => ts.engineerAct(await store.getEngineer(other.id), t.id, { action: 'accept', eta_minutes: 20 }), /helpdesk is handling/);
+    await ts.act(t.id, { action: 'accept', engineer_id: other.id, eta_minutes: 30 }, ADMIN);   // the admin decides who
+    assert.strictEqual((await ts.engineerJobs(await store.getEngineer(other.id))).mine.length, 1);
   });
 
   await test('a failing push service never breaks creating a ticket; dead phone tokens are removed', async () => {

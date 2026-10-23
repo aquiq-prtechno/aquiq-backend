@@ -31,7 +31,7 @@ const KNOWLEDGE = [
   {
     id: 'approval', title: 'Approving the work',
     keywords: ['approve', 'approval', 'satisfied', 'not satisfied', 'happy', 'complete', 'done', 'confirm', 'sign', 'sahi'],
-    text: 'When the engineer finishes, your Request Service card shows "Work done" with two buttons: "Yes, approve the work" and "Not satisfied". If you are not satisfied, tell us what is still wrong; the job reopens and an engineer comes back. If you are not available, the engineer may close the job with a reason, which is recorded on the report.',
+    text: 'When the engineer finishes, your Request Service card shows "Work done" with two buttons: "Yes, approve the work" and "Not satisfied". If you are not satisfied, tell us what is still wrong; the job reopens, our helpdesk team contacts you first, and then arranges an engineer to come back. If you are not available, the engineer may close the job with a reason, which is recorded on the report.',
   },
   {
     id: 'report', title: 'Service report',

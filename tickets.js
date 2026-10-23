@@ -445,7 +445,7 @@ function createTicketService(store, { now = () => new Date(), push = null, mail 
     if (push && actor.role !== 'engineer') {
       if (action === 'accept' || action === 'reassign') push.assigned(updated, updated.engineer_id);
     }
-    if (push && action === 'not_satisfied' && updated.engineer_id) push.reopened(updated, updated.engineer_id);
+    // "Not satisfied": no engineer is told. The admin team calls the customer first and then assigns an engineer.
     if (push && action === 'customer_cancel' && updated.engineer_id) push.cancelled(updated, updated.engineer_id);
     return decorate(updated, at, ctx.of(updated));
   }
@@ -583,7 +583,7 @@ function createTicketService(store, { now = () => new Date(), push = null, mail 
     const onDuty = eng.on_duty !== false;
     for (const t of active) {
       if (!onDuty) break;
-      if (t.status !== 'open' && t.status !== 'reopened') continue;
+      if (t.status !== 'open') continue;                // a reopened job is NOT offered: the admin team talks to the customer, then assigns
       if (t.unverified) continue;                       // not linked to a store yet: the admin must link it first
       if (t.engineer_id === eng.id || declined.has(t.id)) continue;
       const cov = coverageOf(eng, siteOf(t));
@@ -591,7 +591,7 @@ function createTicketService(store, { now = () => new Date(), push = null, mail 
     }
     offers.sort((a, b) => (a.urgency === 'urgent' ? 0 : 1) - (b.urgency === 'urgent' ? 0 : 1) || toMs(a.created_at) - toMs(b.created_at));
     const mine = [];
-    for (const t of active.filter(x => x.engineer_id === eng.id && (WORKING.includes(x.status) || x.status === 'approved'))) {
+    for (const t of active.filter(x => x.engineer_id === eng.id && x.status !== 'reopened' && (WORKING.includes(x.status) || x.status === 'approved'))) {
       mine.push(await jobView(t, at, false));
     }
     return { offers, mine, at: at.toISOString() };
@@ -612,7 +612,8 @@ function createTicketService(store, { now = () => new Date(), push = null, mail 
     const actor = engActor(eng);
 
     if (action === 'accept') {
-      if (!['open', 'reopened'].includes(t.status)) throw httpError(409, 'This complaint was just taken by another engineer.');
+      if (t.status === 'reopened') throw httpError(409, 'The AQUIQ helpdesk is handling this reopened job and will assign an engineer.');
+      if (t.status !== 'open') throw httpError(409, 'This complaint was just taken by another engineer.');
       if (t.engineer_id !== eng.id && !coverageOf(eng, siteOf(t))) throw httpError(403, 'This complaint is outside your area.');
       try {
         await act(id, { action: 'accept', engineer_id: eng.id, eta_minutes: input.eta_minutes }, actor);
@@ -624,7 +625,7 @@ function createTicketService(store, { now = () => new Date(), push = null, mail 
     }
 
     if (action === 'decline') {
-      if (!['open', 'reopened'].includes(t.status)) throw httpError(409, 'This complaint is no longer open.');
+      if (t.status !== 'open') throw httpError(409, 'This complaint is no longer open.');
       if (!coverageOf(eng, siteOf(t))) throw httpError(403, 'This complaint is outside your area.');
       const reason = cleanText(input.reason, 300) || null;
       await store.insertDecline({ ticket_id: id, engineer_id: eng.id, reason });

@@ -1,6 +1,9 @@
 # AQUIQ backend — release history
 Series: MAJOR.MINOR.PATCH. MINOR = new feature, PATCH = fix. Current version is also at `GET /version`.
 
+## 1.6.3 — 23 Oct 2026
+- "Not satisfied": the job is reopened but NOT pushed, offered or takeable by any engineer (the previous engineer no longer sees it either). The AQUIQ admin team talks to the customer first and then assigns an engineer. Reopened mail now says the helpdesk will contact the customer.
+
 ## 1.6.2 — 23 Oct 2026
 - Mail body font: Calibri 11 pt for all ticket and closing mails (the support footer stays in code font). /admin/mail-status also reports which address sends ticket mails, report mails and where replies go.
 

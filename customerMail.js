@@ -118,7 +118,7 @@ function createCustomerMailer(store, mailer, { log = console } = {}) {
       ['As you asked, this service request has been cancelled and no engineer will visit for it.', 'If you still need help, you can raise a new request in the AQUIQ app at any time.'],
       [['Problem', t.issue_category]]),
     reopened: (t) => send(t, `We are sorry – your service ${no(t)} is reopened`,
-      ['Thank you for telling us the work was not satisfactory. We are sorry about that.', 'Your request has been reopened and an engineer will come back to fix it. We will keep you updated.'],
+      ['Thank you for telling us the work was not satisfactory. We are sorry about that.', 'Your request has been reopened. Our helpdesk team will contact you shortly to understand what is still wrong, and will then arrange the engineer visit.'],
       [['Problem', t.issue_category]]),
   };
 }
