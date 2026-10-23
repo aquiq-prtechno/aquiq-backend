@@ -77,6 +77,15 @@ const ASK = { store_id: CUST, phone: '9999900000', issue_category: 'Low or no wa
     const plain = R.createMailer({ MAIL_PROVIDER: 'relay', MAIL_RELAY_URL: 'https://x/api', MAIL_RELAY_SECRET: 's' }, http);
     assert.strictEqual(plain.senderFor('tickets'), null, 'no sender configured = relay default');
   });
+  await test('a ticket cancelled by the admin also emails the customer (not for unverified email senders)', async () => {
+    const w = world({ copyTo: 'team@aquiq.test' });
+    const o = await w.cs.request(ASK); await tick();
+    w.sent.length = 0;
+    await w.ts.act(o.ticket.id, { action: 'cancel', note: 'duplicate' }, ADMIN); await tick(); await tick();
+    assert.strictEqual(w.sent.length, 1); assert.match(w.sent[0].subject, /cancelled/);
+    assert.match(w.sent[0].text, /cancelled by the AQUIQ helpdesk team/); assert.ok(!/duplicate/.test(w.sent[0].text), 'the internal note is not shown');
+    assert.strictEqual(w.sent[0].to, 'owner@saffron.test'); assert.strictEqual(w.sent[0].cc, 'team@aquiq.test');
+  });
   await test('relay mode: the message goes to the relay over HTTPS with the secret and a base64 attachment', async () => {
     const R = require('../reports');
     const calls = [];

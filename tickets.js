@@ -440,7 +440,8 @@ function createTicketService(store, { now = () => new Date(), push = null, mail 
       if (action === 'accept' || action === 'reassign') mail.assigned(updated);
       if (action === 'work_done') mail.workDone(updated);
       if (action === 'not_satisfied') mail.reopened(updated);
-      if (action === 'customer_cancel') mail.cancelled(updated);
+      if (action === 'customer_cancel') mail.cancelled(updated, false);
+      if (action === 'cancel' && !updated.unverified) mail.cancelled(updated, true);     // cancelled by the AQUIQ team: tell the customer too (not unknown email senders)
     }
     if (push && actor.role !== 'engineer') {
       if (action === 'accept' || action === 'reassign') push.assigned(updated, updated.engineer_id);

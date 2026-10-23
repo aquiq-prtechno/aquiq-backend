@@ -1,6 +1,9 @@
 # AQUIQ backend — release history
 Series: MAJOR.MINOR.PATCH. MINOR = new feature, PATCH = fix. Current version is also at `GET /version`.
 
+## 1.6.4 — 23 Oct 2026
+- A ticket cancelled by the admin now also emails the customer (from r-tickets@, care team in CC); the internal cancel note is not shown. Not sent for unverified email senders.
+
 ## 1.6.3 — 23 Oct 2026
 - "Not satisfied": the job is reopened but NOT pushed, offered or takeable by any engineer (the previous engineer no longer sees it either). The AQUIQ admin team talks to the customer first and then assigns an engineer. Reopened mail now says the helpdesk will contact the customer.
 
