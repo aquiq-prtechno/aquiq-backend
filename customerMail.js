@@ -123,4 +123,4 @@ function createCustomerMailer(store, mailer, { log = console } = {}) {
   };
 }
 
-module.exports = { createCustomerMailer, buildNotice, buildReceived, timeOfSec, FOOTER_TEXT };
+module.exports = { createCustomerMailer, buildNotice, buildReceived, timeOfSec, FOOTER_TEXT, footerHtml, problemOf, esc };

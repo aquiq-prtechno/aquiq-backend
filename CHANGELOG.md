@@ -1,6 +1,9 @@
 # AQUIQ backend — release history
 Series: MAJOR.MINOR.PATCH. MINOR = new feature, PATCH = fix. Current version is also at `GET /version`.
 
+## 1.6.1 — 23 Oct 2026
+- Closing mail (with the service report PDF) in the AQUIQ format: subject "REF/TIC CLOSED : FSR-<PMR> – <problem>", STATUS : SOLVED/CLOSED, "Respected Sir/Ma'am", code-font support footer. Sent from info.fs.reports-no-reply@ (needs that address in Gmail "Send mail as").
+
 ## 1.6.0 — 23 Oct 2026
 - Email-to-ticket: mail to r-tickets@ opens a ticket (a Google Apps Script in the mailbox posts each mail to POST /inbound/email, secret INBOUND_SECRET). Replies that quote a PMR number become notes; unregistered senders get a ticket marked EXTERNAL-UNVERIFIED IN AQUIQ SYSTEM that an admin links to a store; bounces / auto-replies / our own addresses are ignored; 5 tickets per sender per day. Category "ISSUE/PROBLEM", subject = problem name, URGENT in the subject = urgent. Needs migration 2026-10-23_email_tickets.sql.
 - New "request received" mail format (RECD - PMR - problem - AQUIQ, Respected Sir/Ma'am, seconds, warranty paragraph) and the code-font support footer under every r-tickets mail.

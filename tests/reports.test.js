@@ -254,18 +254,21 @@ async function toWorkDone(w, e, t) {
     assert.ok(pdf.length > 1500);
   });
 
-  await test('report email: standard subject, AQUIQ-FSR body, closed-by name, system-generated notice, html twin', async () => {
-    const t = { ticket_no: 'PMR2611790131016', contact_person: 'Anuj Thakur', customer_response: 'approved' };
-    const m = R.buildReportMail(t, { report_no: 'FSR-PMR2611790131016', service_name: 'Pump not running – RESOLVED' }, 'Ravi');
-    assert.strictEqual(m.subject, 'SERVICE REPORT – FSR-PMR2611790131016');
-    assert.match(m.text, /^AQUIQ\n/); assert.match(m.text, /Hey Anuj Thakur,/);
-    assert.match(m.text, /Team: AQUIQ-FSR\s+Closed By: Anuj Thakur/); assert.match(m.text, /Regards,\nAQUIQ FSR-ADMIN/);
-    assert.match(m.text, /system-generated Field Service Report issued by the service department/);
+  await test('closing mail: REF/TIC CLOSED subject, SOLVED/CLOSED status, Sir/Ma\'am, code-font footer, no WMS / PR TECHNO', async () => {
+    const t = { ticket_no: 'PMR2611790171023', contact_person: 'Anuj Thakur', issue_category: 'Machine not switching on', urgency: 'normal', source: 'customer_app' };
+    const m = R.buildReportMail(t, { report_no: 'FSR-PMR2611790171023', service_name: 'x' });
+    assert.strictEqual(m.subject, 'REF/TIC CLOSED : FSR-PMR2611790171023 – Machine not switching on');
+    assert.match(m.text, /^Greetings of the day!\nAQUIQ by PR\n\nSTATUS : SOLVED\/CLOSED\n\nYour service\/complaint\/installation "Machine not switching on" has been closed with us via reference\/ticket Id # PMR2611790171023/);
+    assert.match(m.text, /Respected Sir\/Ma'am Anuj Thakur,/);
+    assert.match(m.text, /No pending actions remain from the HELPDESK team\. The ticket is hereby marked as CLOSED\./);
+    assert.match(m.text, /All recipients copied \(mailto\/cc\) in this email are considered part of the communication trail and project record\./);
+    assert.match(m.text, /Regards,\n\nAQUIQ by PR\n/);
+    assert.match(m.text, /mailto: service\.bharat@aquiq-prsons\.com mailcc: careaquiq-prsons@aquiq-prsons\.com mailcc: careprtech@hotmail\.com\. Please follow/);
+    assert.match(m.html, /<b>STATUS : SOLVED\/CLOSED<\/b>/); assert.match(m.html, /font-family:Consolas/); assert.match(m.html, /<b><i><u>PMR2611790171023<\/u><\/i><\/b>/);
     assert.ok(!/WMS|PR TECHNO/.test(m.text + m.html));
-    assert.match(m.html, /<b>Closed By:<\/b> Anuj Thakur/);
-    assert.match(R.buildReportMail({ ...t, customer_response: 'approved_by_admin' }, { report_no: 'X', service_name: 'S' }, 'Ravi').text, /Closed By: AQUIQ Helpdesk/);
-    assert.match(R.buildReportMail({ ...t, customer_response: 'bypassed_by_engineer' }, { report_no: 'X', service_name: 'S' }, 'Ravi').text, /Closed By: Ravi \(Engineer\)/);
-    assert.match(R.buildReportMail({ ...t, contact_person: '<b>x</b>' }, { report_no: 'X', service_name: 'S' }, 'Ravi').html, /Hey &lt;b&gt;x&lt;\/b&gt;,/, 'html-escaped');
+    assert.match(R.buildReportMail({ ...t, urgency: 'urgent' }, {}).text, /"Machine not switching on \(URGENT\)"/);
+    assert.match(R.buildReportMail({ ...t, source: 'email', description: 'Pump noisy\nbody' }, {}).subject, /– Pump noisy$/, 'email tickets use the subject as the problem name');
+    assert.match(R.buildReportMail({ ...t, contact_person: '<b>x</b>' }, {}).html, /Ma&#39;am &lt;b&gt;x&lt;\/b&gt;,/, 'html-escaped');
   });
 
   for (const [s, n] of results) console.log(`${s}  ${n}`);

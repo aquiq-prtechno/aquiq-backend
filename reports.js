@@ -292,42 +292,37 @@ function createMailer(env = process.env, http = require('axios')) {
 
 // ── service ──────────────────────────────────────────────────────────────────
 
-const FSR_DISCLAIMER = 'This is a system-generated Field Service Report issued by the service department and electronically authorized by the designated service personnel of the company. The report is valid without a physical signature or company stamp and is non-billable.';
-const esc = (v) => String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
-// Who gave the approval for the work: the customer, AQUIQ helpdesk on their behalf, or the engineer.
-function closedByName(t, engineerName) {
-  if (t.customer_response === 'approved_by_admin') return 'AQUIQ Helpdesk';
-  if (t.customer_response === 'bypassed_by_engineer' || !t.customer_response) return engineerName ? `${engineerName} (Engineer)` : 'AQUIQ Engineer';
-  return t.contact_person || 'Customer';
-}
-
-// The service report email: plain text and styled HTML (same words).
-function buildReportMail(t, row, engineerName) {
+// The CLOSING mail (sent with the service report PDF after approval), in the format given by the AQUIQ team.
+// Same look and the same code-font footer as the "request received" mail.
+function buildReportMail(t, row) {
+  const CM = require('./customerMail');
+  const problem = CM.problemOf(t);
+  const shown = `${problem}${t.urgency === 'urgent' ? ' (URGENT)' : ''}`;
   const name = t.contact_person || 'Customer';
-  const closedBy = closedByName(t, engineerName);
-  const subject = `SERVICE REPORT – ${row.report_no}`;
-  const intro = 'Please find attached the Field Service Report (FSR) pertaining to our onsite service operation for the above-mentioned ticket.';
-  const help = 'Should you require any further clarification or assistance, please feel free to contact us through the designated support channels.';
+  const subject = `REF/TIC CLOSED : FSR-${t.ticket_no} – ${problem}`;
+  const p1 = 'The reported issue/request has been successfully completed and verified. No pending actions remain from the HELPDESK team. The ticket is hereby marked as CLOSED.';
+  const p2 = 'All recipients copied (mailto/cc) in this email are considered part of the communication trail and project record.';
   const text = [
-    'AQUIQ', '',
-    `Ticket ID: ${t.ticket_no}`, `Service: ${row.service_name}`, '',
-    `Hey ${name},`, '', intro, '', help, '',
-    `Team: AQUIQ-FSR    Closed By: ${closedBy}`, '',
-    'Regards,', 'AQUIQ FSR-ADMIN', '',
-    '--------------------------------------------------', FSR_DISCLAIMER,
+    'Greetings of the day!', 'AQUIQ by PR', '',
+    'STATUS : SOLVED/CLOSED', '',
+    `Your service/complaint/installation "${shown}" has been closed with us via reference/ticket Id # ${t.ticket_no}`, '',
+    `Respected Sir/Ma'am ${name},`, '', p1, '', p2, '',
+    'Regards,', '', 'AQUIQ by PR', '',
+    '--------------------------------------------------', CM.FOOTER_TEXT,
   ].join('\n');
-  const html = `<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.6;max-width:640px">
-<p style="margin:0 0 18px;font-size:18px;font-weight:bold;letter-spacing:.5px">AQUIQ</p>
-<p style="margin:0 0 4px"><b>Ticket ID:</b> ${esc(t.ticket_no)}</p>
-<p style="margin:0 0 18px"><b>Service:</b> ${esc(row.service_name)}</p>
-<p style="margin:0 0 14px">Hey ${esc(name)},</p>
-<p style="margin:0 0 14px">${intro}</p>
-<p style="margin:0 0 18px">${help}</p>
-<p style="margin:0 0 18px"><b>Team:</b> AQUIQ-FSR &nbsp; <b>Closed By:</b> ${esc(closedBy)}</p>
-<p style="margin:0 0 4px">Regards,</p>
-<p style="margin:0 0 18px"><b>AQUIQ FSR-ADMIN</b></p>
-<div style="border-top:2px solid #2a6fb0;padding-top:10px;font-size:12px;line-height:1.5;color:#8a8f98">${FSR_DISCLAIMER}</div>
+  const esc = CM.esc;
+  const html = `<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.6;max-width:680px">
+<p style="margin:0">Greetings of the day!</p>
+<p style="margin:0 0 22px"><b>AQUIQ by PR</b></p>
+<p style="margin:0 0 22px;font-size:17px"><b>STATUS : SOLVED/CLOSED</b></p>
+<p style="margin:0 0 22px">Your service/complaint/installation &ldquo;${esc(shown)}&rdquo; has been closed with us via reference/ticket Id # <b><i><u>${esc(t.ticket_no)}</u></i></b></p>
+<p style="margin:0 0 14px">Respected Sir/Ma&#39;am ${esc(name)},</p>
+<p style="margin:0 0 14px">The reported issue/request has been successfully completed and verified. No pending actions remain from the HELPDESK team. The ticket is hereby marked as <b>CLOSED</b>.</p>
+<p style="margin:0 0 22px">${p2}</p>
+<p style="margin:0 0 4px"><b>Regards,</b></p>
+<p style="margin:0"><b>AQUIQ by PR</b></p>
+${CM.footerHtml()}
 </div>`;
   return { subject, text, html };
 }
@@ -512,7 +507,7 @@ function createReportService(store, tickets, { now = () => new Date(), mailer, f
         await mail.send({
           to: to.length ? to : copy, cc: to.length && copy ? copy : undefined,
           from: mail.senderFor ? mail.senderFor('reports') : undefined,
-          ...buildReportMail(t, row, full.engineer_name || t.engineer_name),
+          ...buildReportMail(t, row),
           attachments: [{ filename: `${row.report_no}.pdf`, content: pdf, contentType: 'application/pdf' }],
         });
         status = to.length ? 'sent' : 'no_customer_email';
