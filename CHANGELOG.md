@@ -1,6 +1,9 @@
 # AQUIQ backend — release history
 Series: MAJOR.MINOR.PATCH. MINOR = new feature, PATCH = fix. Current version is also at `GET /version`.
 
+## 1.6.5 — 23 Oct 2026
+- Ask AQUIQ answers describe the new bottom bar (Service button) in the customer app 1.7.0; latest customer app version is 1.7.0.
+
 ## 1.6.4 — 23 Oct 2026
 - A ticket cancelled by the admin now also emails the customer (from r-tickets@, care team in CC); the internal cancel note is not shown. Not sent for unverified email senders.
 
