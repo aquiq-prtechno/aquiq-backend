@@ -276,6 +276,83 @@ function createTicketService(store, { now = () => new Date(), push = null, mail 
     return decorate(row, at, ctx.of(row));
   }
 
+  // A complaint that arrived by email to r-tickets@. `m.store` is the matched store (or null = unverified sender).
+  // Problem name = the subject (first line of the description); category is always ISSUE/PROBLEM.
+  async function createFromEmail(m) {
+    const subject = cleanText(m.subject, 200).replace(/^((re|fw|fwd)\s*:\s*)+/i, '').trim() || 'Service request by email';
+    const body = String(m.body || '').replace(/\r/g, '').trim();
+    const urgency = /urgent/i.test(String(m.subject || '')) ? 'urgent' : 'normal';
+    const description = `${subject}\n${body}`.slice(0, 1000);
+    const customer = m.store || null;
+    const fromEmail = String(m.from_email || '').trim().toLowerCase();
+    const at = now();
+    const { year, month, day } = istParts(at);
+    const seq = await store.nextSeq(SERIES, START_SEQ);
+    const ticketNo = formatTicketNo(year, seq, month, day);
+    const row = await store.insertTicket({
+      ticket_no: ticketNo, series: SERIES, year, seq,
+      customer_id: customer ? customer.id : null, device_id: customer ? (customer.device_id || null) : null,
+      status: 'open', urgency, source: 'email',
+      issue_category: 'ISSUE/PROBLEM', description,
+      site_name: customer ? (customer.name || null) : 'EXTERNAL-UNVERIFIED IN AQUIQ SYSTEM',
+      contact_person: cleanText(m.from_name, 120) || (customer && customer.name) || fromEmail,
+      contact_phone: customer ? (customer.phone || null) : null,
+      contact_email: fromEmail, unverified: !customer,
+      address: customer ? ([customer.address, customer.city].filter(Boolean).join(', ') || null) : null,
+      pincode: customer ? (customer.pincode || null) : null,
+      latitude: customer ? (customer.latitude ?? null) : null, longitude: customer ? (customer.longitude ?? null) : null,
+      device_snapshot: customer ? snapshotOf(customer, at) : null,
+      raised_by: `email: ${fromEmail}`,
+      open_since: at.toISOString(), created_at: at.toISOString(),
+    });
+    await store.insertEvent({
+      ticket_id: row.id, actor: `email: ${fromEmail}`, actor_role: 'customer',
+      action: 'created', from_status: null, to_status: 'open',
+      note: `Raised by email: ${subject}${urgency === 'urgent' ? ' (urgent)' : ''}`,
+      meta: { ticket_no: ticketNo, source: 'email', unverified: !customer, hint: m.hint || null },
+    });
+    const ctx = await contextFor();
+    if (mail) mail.created(row);
+    if (push && customer) {
+      const onDuty = new Set(ctx.engineers.filter(e => e.on_duty !== false).map(e => e.id));
+      const ids = rankEngineers(siteOf(row), ctx.engineers).recommended.map(e => e.id).filter(id => onDuty.has(id));
+      push.newComplaint(row, ids);
+    }
+    return decorate(row, at, ctx.of(row));
+  }
+
+  // The admin links an "unverified email" complaint to a store; from then on it is a normal complaint.
+  async function linkCustomer(id, customerId, actor) {
+    if (!UUID_RE.test(String(id))) throw httpError(400, 'Invalid ticket.');
+    if (!UUID_RE.test(String(customerId || ''))) throw httpError(400, 'Choose a store.');
+    const t = await store.getTicket(id);
+    if (!t) throw httpError(404, 'Ticket not found.');
+    if (!t.unverified) throw httpError(409, 'This complaint is already linked to a store.');
+    const customer = await store.getCustomer(customerId);
+    if (!customer) throw httpError(404, 'That store was not found.');
+    const at = now();
+    const patch = {
+      customer_id: customer.id, device_id: customer.device_id || null, site_name: customer.name || null,
+      address: [customer.address, customer.city].filter(Boolean).join(', ') || null, pincode: customer.pincode || null,
+      latitude: customer.latitude ?? null, longitude: customer.longitude ?? null,
+      device_snapshot: snapshotOf(customer, at), contact_phone: t.contact_phone || customer.phone || null,
+      unverified: false,
+    };
+    const updated = await store.updateTicketIfStatus(t.id, t.status, patch);
+    if (!updated) throw httpError(409, 'Someone else just changed this ticket. Reload and try again.');
+    await store.insertEvent({
+      ticket_id: t.id, actor: actor.email, actor_role: actor.role,
+      action: 'linked', from_status: t.status, to_status: t.status, note: `Linked to store ${customer.name || customer.id}`, meta: { customer_id: customer.id },
+    });
+    const ctx = await contextFor();
+    if (push && updated.status === 'open') {
+      const onDuty = new Set(ctx.engineers.filter(e => e.on_duty !== false).map(e => e.id));
+      const ids = rankEngineers(siteOf(updated), ctx.engineers).recommended.map(e => e.id).filter(id2 => onDuty.has(id2));
+      push.newComplaint(updated, ids);
+    }
+    return decorate(updated, at, ctx.of(updated));
+  }
+
   async function act(id, input, actor) {
     if (!UUID_RE.test(String(id))) throw httpError(400, 'Invalid ticket.');
     const ticket = await store.getTicket(id);
@@ -299,6 +376,7 @@ function createTicketService(store, { now = () => new Date(), push = null, mail 
       return decorate(ticket, at, c0.of(ticket));
     }
 
+    if (ticket.unverified && action !== 'cancel') throw httpError(409, 'This complaint came from an unverified email. Link it to a store first (or cancel it).');
     const to = (TRANSITIONS[ticket.status] || {})[action];
     if (!to) throw httpError(409, `Can't "${def.label}" while the ticket is "${STATUS_LABELS[ticket.status]}".`);
     if (def.needsNote && !note) throw httpError(400, 'A note is required for this action.');
@@ -506,6 +584,7 @@ function createTicketService(store, { now = () => new Date(), push = null, mail 
     for (const t of active) {
       if (!onDuty) break;
       if (t.status !== 'open' && t.status !== 'reopened') continue;
+      if (t.unverified) continue;                       // not linked to a store yet: the admin must link it first
       if (t.engineer_id === eng.id || declined.has(t.id)) continue;
       const cov = coverageOf(eng, siteOf(t));
       if (cov) offers.push({ ...offerView(t, cov, at), repeat_within_30d: await repeatOf(t, at) });
@@ -681,7 +760,7 @@ function createTicketService(store, { now = () => new Date(), push = null, mail 
   }
 
   return {
-    create, act, list, detail, summary, runWatcher,
+    create, createFromEmail, linkCustomer, getByNumber: (no) => store.getTicketByNo(no), act, list, detail, summary, runWatcher,
     engineerJobs, engineerJob, engineerAct, engineerPhotoUpload, engineerAddPhoto,
     engineerHistory, engineerLocation, engineerScorecard,
   };
@@ -712,6 +791,7 @@ function supabaseStore(sb) {
     getCustomer: (id) => one(sb.from('customers').select(COLS).eq('id', id).maybeSingle()),
     insertTicket: (row) => one(sb.from('tickets').insert([row]).select().single()),
     getTicket: (id) => one(sb.from('tickets').select('*').eq('id', id).maybeSingle()),
+    getTicketByNo: (no) => one(sb.from('tickets').select('*').eq('ticket_no', no).maybeSingle()),
     updateTicketIfStatus: (id, status, patch) =>
       one(sb.from('tickets').update({ ...patch, updated_at: new Date().toISOString() })
         .eq('id', id).eq('status', status).select().maybeSingle()),
@@ -765,6 +845,7 @@ function createTicketsRouter(service) {
   router.get('/', wrap(async (req) => ({ tickets: await service.list(req.query.filter) })));
   router.post('/', wrap(async (req) => ({ ticket: await service.create(req.body || {}, actorOf(req)) })));
   router.get('/:id', wrap((req) => service.detail(req.params.id)));
+  router.post('/:id/link-customer', wrap(async (req) => ({ ticket: await service.linkCustomer(req.params.id, req.body && req.body.customer_id, actorOf(req)) })));
   router.post('/:id/action', wrap(async (req) => ({ ticket: await service.act(req.params.id, req.body || {}, actorOf(req)) })));
   return router;
 }

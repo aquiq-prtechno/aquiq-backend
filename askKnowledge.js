@@ -15,8 +15,8 @@ const KNOWLEDGE = [
   },
   {
     id: 'request', title: 'How to request a service',
-    keywords: ['request', 'book', 'service', 'complaint', 'raise', 'ticket', 'engineer bulana', 'problem', 'issue', 'how do i request', 'how to request', 'how to book'],
-    text: 'Open the app, go to your store, then Service History, and tap "Request Service". Choose the problem, write a few words about it, mark it urgent only if there is no water, and send. You get a ticket number straight away (it starts with PMR). Registered AQUIQ engineers near you are alerted; the first to accept is assigned, and you can see the engineer\'s name and expected arrival time in the same card. You can have one open request at a time, and up to 5 requests a day.',
+    keywords: ['request', 'book', 'service', 'complaint', 'raise', 'ticket', 'r-tickets', 'raise by email', 'email a complaint', 'mail a complaint', 'email to raise', 'raise a ticket by email', 'complaint by email', 'engineer bulana', 'problem', 'issue', 'how do i request', 'how to request', 'how to book'],
+    text: 'You can also raise a request by email: write to r-tickets@aquiq-prsons.com with the problem in the subject (put URGENT in the subject if there is no water). You get a confirmation mail with your PMR ticket number. If you write from an email address that is not registered in AQUIQ, the ticket is still created but marked EXTERNAL-UNVERIFIED until our team links it to your store, so it is best to write from the email registered on your account. In the app: open the app, go to your store, then Service History, and tap "Request Service". Choose the problem, write a few words about it, mark it urgent only if there is no water, and send. You get a ticket number straight away (it starts with PMR). Registered AQUIQ engineers near you are alerted; the first to accept is assigned, and you can see the engineer\'s name and expected arrival time in the same card. You can have one open request at a time, and up to 5 requests a day.',
   },
   {
     id: 'track', title: 'Tracking the engineer',

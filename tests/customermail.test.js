@@ -45,12 +45,21 @@ const ASK = { store_id: CUST, phone: '9999900000', issue_category: 'Low or no wa
     const t = { ticket_no: 'PMR2611790131016', contact_person: 'Anuj Thakur', customer_id: 'c1', issue_category: 'Water leakage', urgency: 'urgent', created_at: '2026-10-16T06:00:00Z', engineer_name: 'Ravi', eta_at: '2026-10-16T07:00:00Z' };
     await mail.created(t); await mail.delayed(t); await mail.reopened(t); await mail.cancelled(t);
     assert.strictEqual(sent.length, 4);
-    for (const m of sent) {
-      assert.match(m.text, /^AQUIQ\n\nTicket ID: PMR2611790131016/); assert.match(m.text, /Hey Anuj Thakur,/);
-      assert.match(m.text, /Team: AQUIQ-SERVICE DESK/); assert.match(m.text, /Regards,\nAQUIQ SERVICE-DESK/); assert.match(m.text, /system-generated notification/);
-      assert.match(m.html, /<b>Ticket ID:<\/b> PMR2611790131016/); assert.ok(!/WMS|PR TECHNO/.test(m.text + m.html));
+    const [recd, ...notices] = sent;
+    assert.match(recd.subject, /^RECD - PMR2611790131016 - Water leakage - AQUIQ$/);
+    assert.match(recd.text, /^Greetings of the day!\nAQUIQ by PR\n\nRaised 16 Oct, 11:30:00 am\n/); assert.match(recd.text, /"Water leakage \(URGENT\)"/);
+    assert.match(recd.text, /Respected Sir\/Ma'am Anuj Thakur,/); assert.match(recd.text, /Regards,\n\nAQUIQ SERVICE DESK/);
+    assert.match(recd.html, /<u>Raised 16 Oct, 11:30:00 am<\/u>/); assert.match(recd.html, /<b><i><u>PMR2611790131016<\/u><\/i><\/b>/);
+    for (const m of [recd, ...notices]) {
+      assert.match(m.text, /This is a system-generated e-mail by AQUIQ\. If you did not request this action or need assistance, please contact our support team at mailto: service\.bharat@aquiq-prsons\.com mailcc: careaquiq-prsons@aquiq-prsons\.com mailcc: careprtech@hotmail\.com\. Please follow the mailto\/cc so our team will reach you soon\.$/);
+      assert.match(m.html, /font-family:Consolas[^"]*"[^>]*>This is a system-generated e-mail/); assert.match(m.html, /href="mailto:service\.bharat@aquiq-prsons\.com\?cc=careaquiq-prsons@aquiq-prsons\.com,careprtech@hotmail\.com"/);
+      assert.ok(!/WMS|PR TECHNO/.test(m.text + m.html));
     }
-    assert.match(sent[0].text, /received your service request/); assert.match(sent[0].text, /Problem: Water leakage \(urgent\)/);
+    for (const m of notices) {
+      assert.match(m.text, /^AQUIQ\n\nTicket ID: PMR2611790131016/); assert.match(m.text, /Hey Anuj Thakur,/);
+      assert.match(m.text, /Team: AQUIQ-SERVICE DESK/); assert.match(m.text, /Regards,\nAQUIQ SERVICE-DESK/);
+      assert.match(m.html, /<b>Ticket ID:<\/b> PMR2611790131016/);
+    }
     assert.match(sent[1].text, /running late/); assert.match(sent[1].text, /Promised by:/);
     assert.match(sent[2].text, /reopened/); assert.match(sent[3].subject, /cancelled/); assert.match(sent[3].text, /no engineer will visit/);
   });
@@ -85,7 +94,7 @@ const ASK = { store_id: CUST, phone: '9999900000', issue_category: 'Low or no wa
     const w = world();
     const eng = await w.es.register({ name: 'Ravi Kumar', phone: '9876543210', pincode: '122001', id_proof_type: 'pan', id_proof_ref: 'ABCDE1234F' }, ADMIN);
     const o = await w.cs.request(ASK); await tick();
-    assert.match(w.sent[0].subject, /received/); assert.match(w.sent[0].text, /PMR/);
+    assert.match(w.sent[0].subject, /^RECD - PMR\d+ - Low or no water flow - AQUIQ$/); assert.match(w.sent[0].text, /PMR/);
     assert.strictEqual(w.sent[0].to, 'owner@saffron.test');
     await w.ts.act(o.ticket.id, { action: 'accept', engineer_id: eng.id, eta_minutes: 30 }, ADMIN); await tick();
     assert.strictEqual(w.sent.length, 1, 'no email when an engineer is assigned');

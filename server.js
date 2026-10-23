@@ -1209,6 +1209,10 @@ const customerMail = require('./customerMail').createCustomerMailer(serviceStore
 const ticketService = ticketsModule.createTicketService(serviceStore, { push: pushService, mail: customerMail });
 const engineerService = engineersModule.createEngineerService(serviceStore, { auth: engineerAccounts });
 app.use('/admin/tickets', ticketsModule.createTicketsRouter(ticketService));
+// Tickets raised by email to r-tickets@ (a Google Apps Script in the mailbox posts each mail here; shared secret, not admin login)
+const inboundModule = require('./inbound');
+const inboundService = inboundModule.createInboundService({ ...serviceStore, ...inboundModule.supabaseInboundStore(supabase) }, ticketService);
+app.use('/inbound', inboundModule.createInboundRouter(inboundService));
 app.get('/admin/engineers/:id/scorecard', async (req, res) => {
   try { res.json(await ticketService.engineerScorecard(req.params.id)); }
   catch (err) { res.status(err.status || 500).json({ error: err.status ? err.message : 'Something went wrong.' }); }

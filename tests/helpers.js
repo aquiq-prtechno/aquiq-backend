@@ -29,6 +29,7 @@ function memStore(customers) {
       tickets.push(t); return copy(t);
     },
     async getTicket(id) { return copy(tickets.find(t => t.id === id)) || null; },
+    async getTicketByNo(no) { return copy(tickets.find(t => t.ticket_no === no)) || null; },
     async updateTicketIfStatus(id, status, patch) {
       const t = tickets.find(x => x.id === id);
       if (!t || t.status !== status) return null;

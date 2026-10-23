@@ -1,6 +1,10 @@
 # AQUIQ backend — release history
 Series: MAJOR.MINOR.PATCH. MINOR = new feature, PATCH = fix. Current version is also at `GET /version`.
 
+## 1.6.0 — 23 Oct 2026
+- Email-to-ticket: mail to r-tickets@ opens a ticket (a Google Apps Script in the mailbox posts each mail to POST /inbound/email, secret INBOUND_SECRET). Replies that quote a PMR number become notes; unregistered senders get a ticket marked EXTERNAL-UNVERIFIED IN AQUIQ SYSTEM that an admin links to a store; bounces / auto-replies / our own addresses are ignored; 5 tickets per sender per day. Category "ISSUE/PROBLEM", subject = problem name, URGENT in the subject = urgent. Needs migration 2026-10-23_email_tickets.sql.
+- New "request received" mail format (RECD - PMR - problem - AQUIQ, Respected Sir/Ma'am, seconds, warranty paragraph) and the code-font support footer under every r-tickets mail.
+
 ## 1.5.3 — 22 Oct 2026
 - Mail can go out from different addresses: MAIL_FROM_TICKETS (request received / late / reopened / cancelled), MAIL_FROM_REPORTS (closing mail + report PDF), MAIL_REPLY_TO. Nothing changes until these Railway variables are set.
 
