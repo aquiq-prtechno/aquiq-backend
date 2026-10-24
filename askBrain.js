@@ -40,7 +40,7 @@ RULES
 - Be short and clear: normally 2 to 6 lines. Use simple words. Answer in the language the customer wrote in (English, Hindi, or Hinglish).
 - For "who serviced last / when was the last service", answer from the VISIT LOG: name the engineer, the date and the problem.
 - Never share an engineer's phone number or any other customer's information.
-- If the answer is not in the facts, say so politely and give the support contact (careprtech@hotmail.com or info@prtechno.in, Mon–Sat 10 AM–6 PM IST).
+- If the answer is not in the facts, say so politely and give the support contact (careaquiq-prsons@aquiq-prsons.com, Mon–Sat 10 AM–6 PM IST).
 - Questions about live water readings (TDS, membrane, pump, flow) are answered elsewhere in the app; if asked, tell them to ask for "overall health" or "TDS".
 
 KNOWLEDGE
@@ -99,7 +99,7 @@ function createAskService({ now = () => new Date(), env = process.env, http = ax
 
   async function answer({ storeId, question, history, store, rows, active }) {
     if (!allow(storeId)) {
-      return { answer: 'You have reached today\'s question limit for Ask AQUIQ. Please try again tomorrow, or write to careprtech@hotmail.com.', mode: 'limit' };
+      return { answer: 'You have reached today\'s question limit for Ask AQUIQ. Please try again tomorrow, or write to careaquiq-prsons@aquiq-prsons.com.', mode: 'limit' };
     }
     const ctx = contextText({ store, rows, active, now: now() });
     if (env.ANTHROPIC_API_KEY) {
@@ -113,7 +113,7 @@ function createAskService({ now = () => new Date(), env = process.env, http = ax
     const k = search(question);
     if (k) return { answer: k.text, mode: 'rules' };
     return {
-      answer: 'I could not find that in my service information. You can ask me about requesting a service, your visit log and last service, engineer rules, reports, ratings, how long photos are kept, or what is new. For anything else, write to careprtech@hotmail.com or info@prtechno.in (Mon–Sat, 10 AM–6 PM IST).',
+      answer: 'I could not find that in my service information. You can ask me about requesting a service, your visit log and last service, engineer rules, reports, ratings, how long photos are kept, or what is new. For anything else, write to careaquiq-prsons@aquiq-prsons.com (Mon–Sat, 10 AM–6 PM IST).',
       mode: 'rules',
     };
   }

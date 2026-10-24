@@ -66,7 +66,7 @@ const KNOWLEDGE = [
   {
     id: 'password', title: 'Forgot password',
     keywords: ['forgot password', 'forgot my password', 'reset password', 'new password', 'change password', 'password bhul', 'cannot login', 'cant login', "can't login", 'unable to login', 'login problem'],
-    text: 'Company accounts: on the login screen tap "Forgot password?", enter your registered email, then enter the 6-digit code we email you and choose a new password (at least 8 characters, with letters and numbers). Stores log in with their registered mobile number or a confirmed email and a 6-digit code, so they have no password to forget. If you have no email on your account, write to info@prtechno.in or careprtech@hotmail.com and we will help.',
+    text: 'Company accounts: on the login screen tap "Forgot password?", enter your registered email, then enter the 6-digit code we email you and choose a new password (at least 8 characters, with letters and numbers). Stores log in with their registered mobile number or a confirmed email and a 6-digit code, so they have no password to forget. If you have no email on your account, write to careaquiq-prsons@aquiq-prsons.com and we will help.',
   },
   {
     id: 'rating', title: 'Rating a service',
@@ -86,7 +86,7 @@ const KNOWLEDGE = [
   {
     id: 'support', title: 'Contact and support',
     keywords: ['contact', 'support', 'help', 'call', 'email', 'phone', 'number', 'hours', 'timing', 'care'],
-    text: 'AQUIQ support: careprtech@hotmail.com or info@prtechno.in. Support hours are Monday to Saturday, 10 AM to 6 PM IST. For an urgent problem with no water, use "Request Service" and mark it urgent.',
+    text: 'AQUIQ support: careaquiq-prsons@aquiq-prsons.com. Support hours are Monday to Saturday, 10 AM to 6 PM IST. For an urgent problem with no water, use "Request Service" and mark it urgent.',
   },
   {
     id: 'privacy', title: 'Privacy',

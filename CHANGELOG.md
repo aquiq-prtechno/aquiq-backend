@@ -1,6 +1,9 @@
 # AQUIQ backend — release history
 Series: MAJOR.MINOR.PATCH. MINOR = new feature, PATCH = fix. Current version is also at `GET /version`.
 
+## 1.8.3 — 24 Oct 2026
+- Support e-mail in Ask AQUIQ answers/knowledge is now careaquiq-prsons@aquiq-prsons.com (was careprtech@hotmail.com / info@prtechno.in). Latest customer 1.9.2.
+
 ## 1.8.2 — 24 Oct 2026
 - PR SONS logo now in navy, teal and gold, horizontal (mark left, "PR SONS" right). Service report header: logo, then AQUIQ™ in bold navy; FSR no., ticket and date/time in code font. Footer shows r-tickets@ and careaquiq-prsons@ in code font. Fixed "undefined – undefined" in the T.D.S Output row. Latest customer 1.9.1, admin 1.6.1.
 

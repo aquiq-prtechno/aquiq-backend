@@ -60,7 +60,7 @@ async function oneFinishedJob(w) {
   await test('unknown questions get a polite pointer to support', async () => {
     const w = world();
     const r = await w.cs.ask({ ...ID, question: 'what is the capital of france' });
-    assert.match(r.answer, /careprtech@hotmail.com/);
+    assert.match(r.answer, /careaquiq-prsons@aquiq-prsons.com/);
   });
 
   await test('with an API key the AI model is used, with the visit log and knowledge in the prompt', async () => {
