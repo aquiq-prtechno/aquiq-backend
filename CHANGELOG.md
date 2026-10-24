@@ -1,6 +1,9 @@
 # AQUIQ backend — release history
 Series: MAJOR.MINOR.PATCH. MINOR = new feature, PATCH = fix. Current version is also at `GET /version`.
 
+## 1.8.11 — 24 Oct 2026
+- Latest admin 1.6.4.
+
 ## 1.8.10 — 24 Oct 2026
 - Latest admin 1.6.3.
 
