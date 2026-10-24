@@ -1,6 +1,9 @@
 # AQUIQ backend — release history
 Series: MAJOR.MINOR.PATCH. MINOR = new feature, PATCH = fix. Current version is also at `GET /version`.
 
+## 1.6.8 — 24 Oct 2026
+- Latest customer app version is 1.7.2.
+
 ## 1.6.7 — 24 Oct 2026
 - Latest customer app version is 1.7.1.
 
