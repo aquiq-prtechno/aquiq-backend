@@ -1,6 +1,9 @@
 # AQUIQ backend — release history
 Series: MAJOR.MINOR.PATCH. MINOR = new feature, PATCH = fix. Current version is also at `GET /version`.
 
+## 1.7.1 — 24 Oct 2026
+- Latest customer app version is 1.8.1.
+
 ## 1.7.0 — 24 Oct 2026
 - "Your RO has stopped" notice: when the pump has been OFF for 10 minutes (device online, between 6 am and 10 pm IST, within 90 minutes of the stop) the customer gets ONE push asking them to check if the tank is full, and to raise a request if not. Tracked with customers.pump_off_since / pump_off_notified_at (needs migration 2026-10-24_ro_stopped.sql; until it is run tracking pauses quietly and device data is unaffected). Ask AQUIQ explains why an RO stops and what the card colours mean. Latest customer app 1.8.0.
 
