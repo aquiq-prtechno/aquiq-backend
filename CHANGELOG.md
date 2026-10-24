@@ -1,6 +1,9 @@
 # AQUIQ backend — release history
 Series: MAJOR.MINOR.PATCH. MINOR = new feature, PATCH = fix. Current version is also at `GET /version`.
 
+## 1.8.8 — 24 Oct 2026
+- Latest engineer app 1.5.0 (new APK: gradient, wave, site map). Older engineer apps are flagged as outdated.
+
 ## 1.8.7 — 24 Oct 2026
 - Latest engineer app 1.3.2.
 
