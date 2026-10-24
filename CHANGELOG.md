@@ -1,6 +1,9 @@
 # AQUIQ backend — release history
 Series: MAJOR.MINOR.PATCH. MINOR = new feature, PATCH = fix. Current version is also at `GET /version`.
 
+## 1.8.1 — 24 Oct 2026
+- Latest customer app 1.9.0, admin 1.6.0 (company branding).
+
 ## 1.8.0 — 24 Oct 2026
 - PR SONS company logo (dark blue, navy) in the header of every service report PDF and on the Visit Log exports; "Powered by PR SONS" in code font at the foot of every PDF page and under every ticket / closing / code email. Company-name mentions (PR TECHNO) changed to AQUIQ in the assistant and messages (addresses and domains unchanged).
 
