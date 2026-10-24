@@ -188,6 +188,9 @@ app.post('/data', async (req, res) => {
       return res.status(404).json({ error: 'Device not found. Register device in admin first.' });
     }
 
+    // Note when the pump goes OFF / runs again (for the "Your RO has stopped" notice). Never blocks the reading.
+    roTrack(customer, pump_status);
+
     // ── Remote Suspension Check ──────────────────────────────────────────────
     // If admin suspended this device — return suspended status immediately
     // ESP32 will show solid red LED and stop sending data
@@ -381,7 +384,7 @@ async function detectAnomalies(customer, current) {
   }
 }
 
-async function sendPushNotification(token, title, body, severity = 'warning') {
+async function sendPushNotification(token, title, body, severity = 'warning', extra = {}) {
   try {
     const channelId = severity === 'critical' ? 'aquiq-critical'
       : severity === 'warning' ? 'aquiq-warning'
@@ -395,7 +398,7 @@ async function sendPushNotification(token, title, body, severity = 'warning') {
       channelId,                   // Android channel (has custom sound embedded)
       priority: severity === 'critical' ? 'high' : 'normal',
       badge: 1,
-      data: { type: 'anomaly', severity },
+      data: { type: 'anomaly', severity, ...extra },
     }, { headers: { 'Content-Type': 'application/json' } });
     console.log(`[AQUIQ] Push sent — channel: ${channelId}`);
   } catch (err) {
@@ -1256,6 +1259,16 @@ app.use('/engineer', engineerApi.createEngineerApiRouter({
   auth: engineerApi.createEngineerAuth(supabase, serviceStore),
 }));
 ticketsModule.startTicketWatcher(ticketService, cron);
+
+// "Your RO has stopped": a few minutes after the pump goes off (most often the tank is full), tell the customer once.
+const roStopped = require('./roStopped');
+const roTrack = roStopped.createTracker(supabase);
+cron.schedule('* * * * *', () => {
+  roStopped.runRoStopped({
+    store: roStopped.supabaseStore(supabase),
+    send: (token, title, body, extra) => sendPushNotification(token, title, body, 'warning', extra),
+  }).catch((err) => console.error('[RO-STOP] run:', err.message));
+});
 
 // Admin: is email working? Sends a real test message and returns the exact error if it fails.
 app.get('/admin/mail-status', (_req, res) => {

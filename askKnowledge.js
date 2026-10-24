@@ -9,6 +9,16 @@ const KNOWLEDGE = [
     text: 'AQUIQ monitors your RO water purifier all day: TDS, membrane health, pump, flow and more. It alerts you when something needs attention, prepares monthly reports, lets you request a service engineer in the app, and answers your questions here in Ask AQUIQ.',
   },
   {
+    id: 'rostopped', title: 'Why has my RO stopped?',
+    keywords: ['ro stopped', 'ro has stopped', 'ro stops', 'ro stop', 'ro not running', 'machine stopped', 'machine not running', 'not producing water', 'tank full', 'auto cut', 'autocut', 'ro resting', 'ro off', 'stopped working', 'why stopped'],
+    text: 'Most often an RO stops because your tank is full: the RO then rests and starts again by itself when water is used, and you will see it live on the Home screen. A few minutes after the RO stops, AQUIQ sends you a notice and a pop-up asking you to check the tank. If the tank is full, tap "My tank is full" and do nothing. If the tank is not full, tap "Raise a request" and AQUIQ will help.',
+  },
+  {
+    id: 'colours', title: 'What do the colours on the water quality card mean?',
+    keywords: ['colour', 'color', 'colours', 'colors', 'card colour', 'card color', 'what does red mean', 'what does blue mean', 'wave', 'hero card'],
+    text: 'The card colour follows how pure your water is compared with your limit: deep ocean blue-green means very pure, blue and green mean good, yellow and orange mean the TDS is getting close to your limit, and red means it is above your limit. Grey means your device is offline. The wave along the bottom moves only while your RO is running. The small weather note shows today\'s weather at your site.',
+  },
+  {
     id: 'cancel', title: 'Cancelling a service request',
     keywords: ['cancel', 'cancel request', 'cancel order', 'cancel service', 'cancel complaint', 'cancel ticket', 'withdraw', 'dont need', 'don\'t need', 'changed my mind', 'not needed', 'stop request'],
     text: 'To cancel, open the app, go to Request Service and tap "Cancel request" at the bottom of the card, then confirm. You can cancel while the request is waiting for an engineer or the engineer is on the way. The engineer is told at once and you get a confirmation email. Once the engineer has reached your site or finished the work it can no longer be cancelled in the app, so please call AQUIQ support. After cancelling you can raise a new request any time.',
