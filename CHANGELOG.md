@@ -1,6 +1,9 @@
 # AQUIQ backend — release history
 Series: MAJOR.MINOR.PATCH. MINOR = new feature, PATCH = fix. Current version is also at `GET /version`.
 
+## 1.8.4 — 24 Oct 2026
+- Latest customer app 1.10.0 (company dashboard redesign).
+
 ## 1.8.3 — 24 Oct 2026
 - Support e-mail in Ask AQUIQ answers/knowledge is now careaquiq-prsons@aquiq-prsons.com (was careprtech@hotmail.com / info@prtechno.in). Latest customer 1.9.2.
 
