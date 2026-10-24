@@ -32,7 +32,7 @@ function world({ uhadEmail = null, enabled = true } = {}) {
     findStoresByVerifiedEmail: async (e) => Object.values(db.stores).filter(x => x.email === e && x.verified),
   };
   const sent = [];
-  const mailer = { enabled, send: async (m) => sent.push(m) };
+  const mailer = { enabled, senderFor: (k) => (k === 'accounts' ? { address: 'info.fs.reports-no-reply@aq.test', name: 'AQUIQ Service Desk' } : null), send: async (m) => sent.push(m) };
   const svc = C.createContactService(store, mailer, { now: c.now });
   return { c, db, svc, sent };
 }
@@ -174,6 +174,20 @@ const U = { kind: 'uhad', id: UHAD, phone: '8888800000' };
     const r = await w.svc.uhadLogin({ email: 'owner@pr.test', password: 'NewPass2026' });
     assert.strictEqual(r.uhad.id, UHAD);
     await ok400(w.svc.uhadLogin({ email: 'owner@pr.test', password: 'OldPass123' }), 401);
+  });
+
+  await test('confirmation, login and password-reset codes are sent from the accounts sender (the reports address), not the default mailbox', async () => {
+    const w = world();
+    await w.svc.requestCode({ ...S, email: 'hotel@saffron.test' });
+    const reset = world({ uhadEmail: 'owner@pr.test' });
+    await reset.svc.uhadForgot({ email: 'owner@pr.test' });
+    const login = world();
+    login.db.stores[STORE].email = 'hotel@saffron.test'; login.db.stores[STORE].verified = true;
+    await login.svc.loginCode({ email: 'hotel@saffron.test' });
+    assert.strictEqual(reset.sent[0].to, 'owner@pr.test', 'the reset code goes to the email of that company account');
+    const all = [...w.sent, ...reset.sent, ...login.sent];
+    assert.strictEqual(all.length, 3, 'one code mail from each of the three flows');
+    for (const m of all) assert.deepStrictEqual(m.from, { address: 'info.fs.reports-no-reply@aq.test', name: 'AQUIQ Service Desk' });
   });
 
   await test('forgot password never reveals whether an email exists; codes expire and cannot be guessed', async () => {

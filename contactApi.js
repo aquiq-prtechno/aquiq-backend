@@ -68,6 +68,7 @@ function createContactService(store, mailer, { now = () => new Date() } = {}) {
     const code = String(crypto.randomInt(100000, 1000000));
     const token = fileLinks.sign({ k: 'contact', kind: a.kind, id: a.id, purpose, value }, 600, now().getTime());
     await mailer.send({
+      from: mailer.senderFor ? mailer.senderFor('accounts') : undefined,
       to: sendTo, subject: 'Your AQUIQ confirmation code',
       text: `Your AQUIQ confirmation code is ${code}.\n\nIt works for 10 minutes. ${target === 'email' ? 'It confirms that this email address belongs to you, so AQUIQ can send you service updates and reports.' : 'It confirms the change of your mobile number.'}\n\nIf you did not ask for this, you can ignore this email.\n\nAQUIQ Service Desk`,
     });
@@ -107,6 +108,7 @@ function createContactService(store, mailer, { now = () => new Date() } = {}) {
     // same answer whether or not the email is registered, so nobody can probe which emails exist
     if (stores.length) {
       await mailer.send({
+        from: mailer.senderFor ? mailer.senderFor('accounts') : undefined,
         to: email, subject: 'Your AQUIQ login code',
         text: `Your AQUIQ login code is ${code}.\n\nIt works for 10 minutes. If you did not try to log in, you can ignore this email.\n\nAQUIQ Service Desk`,
       });
@@ -163,6 +165,7 @@ function createContactService(store, mailer, { now = () => new Date() } = {}) {
     const token = fileLinks.sign({ k: 'uhadreset', email }, 600, now().getTime());
     if (u) {
       await mailer.send({
+        from: mailer.senderFor ? mailer.senderFor('accounts') : undefined,
         to: email, subject: 'Reset your AQUIQ password',
         text: `Your AQUIQ password reset code is ${code}.\n\nIt works for 10 minutes. Enter it in the app and choose a new password. If you did not ask for this, ignore this email; your password has not changed.\n\nAQUIQ Service Desk`,
       });

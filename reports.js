@@ -236,6 +236,8 @@ function createMailer(env = process.env, http = require('axios')) {
   const senderCfg = {
     tickets: { address: env.MAIL_FROM_TICKETS, name: env.MAIL_NAME_TICKETS || 'AQUIQ Service Desk' },
     reports: { address: env.MAIL_FROM_REPORTS, name: env.MAIL_NAME_REPORTS || 'AQUIQ Reports' },
+    // login / confirmation / password-reset codes: sent from the reports address unless MAIL_FROM_ACCOUNTS says otherwise
+    accounts: { address: env.MAIL_FROM_ACCOUNTS || env.MAIL_FROM_REPORTS, name: env.MAIL_NAME_ACCOUNTS || 'AQUIQ Service Desk' },
   };
   const senderFor = (kind) => { const s = senderCfg[kind]; return s && s.address ? { address: String(s.address).trim(), name: s.name } : null; };
   const defaultReplyTo = env.MAIL_REPLY_TO ? String(env.MAIL_REPLY_TO).trim() : null;

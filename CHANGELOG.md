@@ -1,6 +1,9 @@
 # AQUIQ backend — release history
 Series: MAJOR.MINOR.PATCH. MINOR = new feature, PATCH = fix. Current version is also at `GET /version`.
 
+## 1.6.6 — 24 Oct 2026
+- Login, email-confirmation and password-reset code mails are now sent from the reports address (info.fs.reports-no-reply@) instead of the default mailbox. New optional sender kind: MAIL_FROM_ACCOUNTS (defaults to MAIL_FROM_REPORTS).
+
 ## 1.6.5 — 23 Oct 2026
 - Ask AQUIQ answers describe the new bottom bar (Service button) in the customer app 1.7.0; latest customer app version is 1.7.0.
 
