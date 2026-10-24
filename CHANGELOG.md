@@ -1,6 +1,9 @@
 # AQUIQ backend — release history
 Series: MAJOR.MINOR.PATCH. MINOR = new feature, PATCH = fix. Current version is also at `GET /version`.
 
+## 1.9.0 — 24 Oct 2026
+- Unique ID (WI) (the device's WiFi ID): sent to service engineers as a compact value (51916AQPR783B01) on offers and jobs, only for stores with an AQUIQ device that is powered on (data in the last 5 min); printed in code font under the FSR number on the service report (same rules); never shown in History. Latest engineer 1.5.1, admin 1.6.5.
+
 ## 1.8.11 — 24 Oct 2026
 - Latest admin 1.6.4.
 

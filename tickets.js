@@ -12,6 +12,7 @@
 
 const express = require('express');
 const crypto = require('crypto');
+const uniqueId = require('./uniqueId');
 const { rankEngineers, coverageOf, haversineKm } = require('./engineers');
 const { ARRIVAL_RADIUS_M, CHECKLIST, NO_GPS_REASONS } = require('./fieldRules');
 
@@ -565,10 +566,17 @@ function createTicketService(store, { now = () => new Date(), push = null, mail 
       accepted_at: t.accepted_at, arrived_at: t.arrived_at, work_done_at: t.work_done_at,
       customer_response: t.customer_response, customer_reason: t.customer_reason,
       photos: await photosOf(t.id, withUrls),
+      unique_id: await uniqueIdFor(t, at),
     };
   }
 
   // same customer had a finished service in the last 30 days: quality / warranty flag
+  // Unique ID (WI) for the engineer: only for stores with an AQUIQ device, and only while it is powered on
+  async function uniqueIdFor(t, at) {
+    if (!t.customer_id || !store.getCustomer) return null;
+    try { return uniqueId.forStaff(await store.getCustomer(t.customer_id), at); } catch { return null; }
+  }
+
   async function repeatOf(t, at) {
     if (!store.listByCustomer || !t.customer_id) return false;
     const cutoff = at.getTime() - 30 * 86400000;
@@ -588,7 +596,7 @@ function createTicketService(store, { now = () => new Date(), push = null, mail 
       if (t.unverified) continue;                       // not linked to a store yet: the admin must link it first
       if (t.engineer_id === eng.id || declined.has(t.id)) continue;
       const cov = coverageOf(eng, siteOf(t));
-      if (cov) offers.push({ ...offerView(t, cov, at), repeat_within_30d: await repeatOf(t, at) });
+      if (cov) offers.push({ ...offerView(t, cov, at), repeat_within_30d: await repeatOf(t, at), unique_id: await uniqueIdFor(t, at) });
     }
     offers.sort((a, b) => (a.urgency === 'urgent' ? 0 : 1) - (b.urgency === 'urgent' ? 0 : 1) || toMs(a.created_at) - toMs(b.created_at));
     const mine = [];
@@ -781,7 +789,7 @@ function supabaseStore(sb) {
   };
   const one = async (q) => { const { data, error } = await q; if (error) throw fail(error); return data; };
 
-  const COLS = 'id,name,phone,address,city,pincode,latitude,longitude,device_id,last_tds,last_seen,sensor_data,connection_type,network_name,pump_baseline,pump_status';
+  const COLS = 'id,name,phone,address,city,pincode,latitude,longitude,device_id,wifi_device_id,last_tds,last_seen,sensor_data,connection_type,network_name,pump_baseline,pump_status';
 
   return {
     async nextSeq(series, start) {

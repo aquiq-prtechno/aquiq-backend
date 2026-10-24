@@ -13,6 +13,7 @@
 const express = require('express');
 const { istParts, snapshotOf, mediaOf, PHOTO_BUCKET, ONLINE_WINDOW_MS } = require('./tickets');
 const { logoWide, stampFooters, LETTERHEAD } = require('./letterhead');
+const uniqueId = require('./uniqueId');
 const fileLinks = require('./fileLinks');
 const { PARTS, CHECKLIST } = require('./fieldRules');
 
@@ -72,6 +73,7 @@ function deviceReadings(customer, at) {
     captured_at: at.toISOString(),
     last_seen: s.last_seen,
     device_online: s.device_online,
+    unique_id: uniqueId.forStaff(customer, at),   // Unique ID (WI) on the report, only for AQUIQ-device stores that were powered on
     stale: !s.device_online,
     feed_tds: val(s.feed_tds, ' ppm'),
     output_tds: val(s.output_tds, ' ppm'),
@@ -120,9 +122,12 @@ function renderPdf(report, images) {
     doc.fillColor(NAVY).font('Helvetica-Bold').fontSize(22).text('AQUIQ™', 40, 92, { lineBreak: false });
     doc.fillColor(INK).font('Helvetica-Bold').fontSize(14).text('SERVICE REPORT', 140, 98, { lineBreak: false });
     doc.fillColor(MUTED).font('Courier').fontSize(9.5)
-      .text(`FSR No: ${report.report_no}`, 40, 44, { width: W, align: 'right' })
-      .text(`Ticket: ${report.ticket_no}`, 40, 58, { width: W, align: 'right' })
-      .text(`Date / time: ${report.when_label}`, 40, 72, { width: W, align: 'right' });
+      .text(`FSR No: ${report.report_no}`, 40, 38, { width: W, align: 'right' });
+    let hy = 52;
+    const uid = report.device_readings && report.device_readings.unique_id;
+    if (uid) { doc.text(`Unique ID (WI): ${uid}`, 40, hy, { width: W, align: 'right' }); hy += 14; }
+    doc.text(`Ticket: ${report.ticket_no}`, 40, hy, { width: W, align: 'right' });
+    doc.text(`Date / time: ${report.when_label}`, 40, hy + 14, { width: W, align: 'right' });
     doc.moveTo(40, 124).lineTo(40 + W, 124).strokeColor('#BBBBBB').stroke();
 
     let y = 136;
