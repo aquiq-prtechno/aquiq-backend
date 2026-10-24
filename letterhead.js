@@ -8,7 +8,7 @@ const WIDE_LOGO_PATH = path.join(__dirname, 'assets', 'pr-sons-logo.png');     /
 const LETTERHEAD = {
   company: 'AQUIQ™',
   product: 'Water Monitoring Systems',
-  line: 'info@prtechno.in  ·  careprtech@hotmail.com',
+  line: 'r-tickets@aquiq-prsons.com  ·  careaquiq-prsons@aquiq-prsons.com',
 };
 
 let logoBuf = null;
@@ -38,12 +38,12 @@ function stampFooters(doc, stampText, leftText) {
     doc.moveTo(40, height - 52).lineTo(40 + w, height - 52).strokeColor('#CCCCCC').lineWidth(0.5).stroke();
     doc.fillColor('#333333').font('Helvetica-Bold').fontSize(8.5)
       .text(`${LETTERHEAD.company}  |  ${LETTERHEAD.product}`, 40, height - 46, { width: w, align: 'center', lineBreak: false });
-    doc.fillColor('#666666').font('Helvetica').fontSize(8)
+    doc.fillColor('#555555').font('Courier').fontSize(8)
       .text(LETTERHEAD.line, 40, height - 34, { width: w, align: 'center', lineBreak: false });
     doc.fillColor('#666666').font('Courier').fontSize(8)
       .text('Powered by PR SONS', 40, height - 22, { width: w, align: 'center', lineBreak: false });
     if (leftText) {
-      doc.fillColor('#111111').fontSize(8.5)
+      doc.fillColor('#111111').font('Courier').fontSize(8.5)
         .text(leftText, 40, 16, { width: w / 2, lineBreak: false })
         .text(stampText || '', 40 + w / 2, 16, { width: w / 2, align: 'right', lineBreak: false });
     }

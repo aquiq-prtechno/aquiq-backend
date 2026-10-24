@@ -103,6 +103,7 @@ function stampText(at) {
 const INK = '#111111';
 const MUTED = '#555555';
 const AMBER = '#C25A00';
+const NAVY = '#0B1F44';
 
 function renderPdf(report, images) {
   const PDFDocument = require('pdfkit');
@@ -115,16 +116,16 @@ function renderPdf(report, images) {
     const W = doc.page.width - 80;
 
     const lg = logoWide();
-    if (lg) { try { doc.image(lg, 40, 30, { fit: [150, 52] }); } catch { /* logo is optional */ } }
-    doc.fillColor(AMBER).font('Helvetica-Bold').fontSize(18).text('AQUIQ™', 205, 36);
-    doc.fillColor(INK).fontSize(22).text('SERVICE REPORT', 205, 63);
-    doc.fillColor(MUTED).font('Helvetica').fontSize(10)
+    if (lg) { try { doc.image(lg, 40, 24, { fit: [190, 62] }); } catch { /* logo is optional */ } }
+    doc.fillColor(NAVY).font('Helvetica-Bold').fontSize(22).text('AQUIQ™', 40, 92, { lineBreak: false });
+    doc.fillColor(INK).font('Helvetica-Bold').fontSize(14).text('SERVICE REPORT', 140, 98, { lineBreak: false });
+    doc.fillColor(MUTED).font('Courier').fontSize(9.5)
       .text(`FSR No: ${report.report_no}`, 40, 44, { width: W, align: 'right' })
       .text(`Ticket: ${report.ticket_no}`, 40, 58, { width: W, align: 'right' })
       .text(`Date / time: ${report.when_label}`, 40, 72, { width: W, align: 'right' });
-    doc.moveTo(40, 104).lineTo(40 + W, 104).strokeColor('#BBBBBB').stroke();
+    doc.moveTo(40, 124).lineTo(40 + W, 124).strokeColor('#BBBBBB').stroke();
 
-    let y = 116;
+    let y = 136;
     const line = (label, value) => {
       doc.fillColor(MUTED).font('Helvetica').fontSize(9).text(label.toUpperCase(), 40, y, { width: 130 });
       doc.fillColor(INK).font('Helvetica-Bold').fontSize(11).text(String(value || '—'), 175, y - 1, { width: W - 135 });
@@ -148,7 +149,7 @@ function renderPdf(report, images) {
     const dr = report.device_readings || {};
     const rows = [
       ['Color', 'Standard'], ['Make', 'SER_PRTEC'], ['Capacity', d.capacity],
-      ['T.D.S Input (device)', dr.feed_tds], ['T.D.S Output (device)', `${dr.output_tds}   –   ${d.tds_status}`],
+      ['T.D.S Input (device)', dr.feed_tds], ['T.D.S Output (device)', [dr.output_tds, d.tds_status].filter(x => x !== undefined && x !== null && x !== '').join('   –   ') || '—'],
       ['Output flow (device)', dr.output_flow], ['Reject flow (device)', dr.reject_flow],
       ['Membrane (device)', dr.membrane], ['Pump (device)', dr.pump_condition],
       ['Load', d.load],

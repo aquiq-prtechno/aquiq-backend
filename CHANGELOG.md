@@ -1,6 +1,9 @@
 # AQUIQ backend — release history
 Series: MAJOR.MINOR.PATCH. MINOR = new feature, PATCH = fix. Current version is also at `GET /version`.
 
+## 1.8.2 — 24 Oct 2026
+- PR SONS logo now in navy, teal and gold, horizontal (mark left, "PR SONS" right). Service report header: logo, then AQUIQ™ in bold navy; FSR no., ticket and date/time in code font. Footer shows r-tickets@ and careaquiq-prsons@ in code font. Fixed "undefined – undefined" in the T.D.S Output row. Latest customer 1.9.1, admin 1.6.1.
+
 ## 1.8.1 — 24 Oct 2026
 - Latest customer app 1.9.0, admin 1.6.0 (company branding).
 
