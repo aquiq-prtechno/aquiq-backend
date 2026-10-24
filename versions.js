@@ -1,7 +1,7 @@
 'use strict';
 // The newest release of each app. Bump the matching line with every update (see CHANGELOG.md),
 // so the admin panel can show who is still running an older version.
-const LATEST = { customer: '1.7.0', engineer: '1.2.1', admin: '1.5.1' };
+const LATEST = { customer: '1.7.1', engineer: '1.2.1', admin: '1.5.1' };
 
 const parts = (v) => String(v || '').split('.').map(n => parseInt(n, 10) || 0);
 
