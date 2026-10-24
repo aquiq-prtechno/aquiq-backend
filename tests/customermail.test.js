@@ -51,7 +51,7 @@ const ASK = { store_id: CUST, phone: '9999900000', issue_category: 'Low or no wa
     assert.match(recd.text, /Respected Sir\/Ma'am Anuj Thakur,/); assert.match(recd.text, /Regards,\n\nAQUIQ SERVICE DESK/);
     assert.match(recd.html, /<u>Raised 16 Oct, 11:30:00 am<\/u>/); assert.match(recd.html, /<b><i><u>PMR2611790131016<\/u><\/i><\/b>/);
     for (const m of [recd, ...notices]) {
-      assert.match(m.text, /This is a system-generated e-mail by AQUIQ\. If you did not request this action or need assistance, please contact our support team at mailto: service\.bharat@aquiq-prsons\.com mailcc: careaquiq-prsons@aquiq-prsons\.com mailcc: careprtech@hotmail\.com\. Please follow the mailto\/cc so our team will reach you soon\.$/);
+      assert.match(m.text, /This is a system-generated e-mail by AQUIQ\. If you did not request this action or need assistance, please contact our support team at mailto: service\.bharat@aquiq-prsons\.com mailcc: careaquiq-prsons@aquiq-prsons\.com mailcc: careprtech@hotmail\.com\. Please follow the mailto\/cc so our team will reach you soon\.\n\nPowered by PR SONS$/);
       assert.match(m.html, /font-family:Consolas[^"]*"[^>]*>This is a system-generated e-mail/); assert.match(m.html, /href="mailto:service\.bharat@aquiq-prsons\.com\?cc=careaquiq-prsons@aquiq-prsons\.com,careprtech@hotmail\.com"/);
       assert.ok(!/WMS|PR TECHNO/.test(m.text + m.html));
     }

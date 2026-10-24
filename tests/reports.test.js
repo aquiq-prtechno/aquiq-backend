@@ -263,7 +263,7 @@ async function toWorkDone(w, e, t) {
     assert.match(m.text, /No pending actions remain from the HELPDESK team\. The ticket is hereby marked as CLOSED\./);
     assert.match(m.text, /All recipients copied \(mailto\/cc\) in this email are considered part of the communication trail and project record\./);
     assert.match(m.text, /Regards,\n\nAQUIQ by PR\n/);
-    assert.match(m.text, /mailto: service\.bharat@aquiq-prsons\.com mailcc: careaquiq-prsons@aquiq-prsons\.com mailcc: careprtech@hotmail\.com\. Please follow/);
+    assert.match(m.text, /mailto: service\.bharat@aquiq-prsons\.com mailcc: careaquiq-prsons@aquiq-prsons\.com mailcc: careprtech@hotmail\.com\. Please follow/); assert.match(m.text, /Powered by PR SONS$/); assert.match(m.html, /Powered by PR SONS<\/div>/);
     assert.match(m.html, /<b>STATUS : SOLVED\/CLOSED<\/b>/); assert.match(m.html, /font-family:Consolas/); assert.match(m.html, /<b><i><u>PMR2611790171023<\/u><\/i><\/b>/);
     assert.ok(!/WMS|PR TECHNO/.test(m.text + m.html));
     assert.match(R.buildReportMail({ ...t, urgency: 'urgent' }, {}).text, /"Machine not switching on \(URGENT\)"/);

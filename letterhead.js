@@ -3,7 +3,8 @@
 const fs = require('fs');
 const path = require('path');
 
-const LOGO_PATH = path.join(__dirname, 'assets', 'aquiq-logo.png');
+const LOGO_PATH = path.join(__dirname, 'assets', 'pr-sons-mark.png');          // square mark: exports and small headers
+const WIDE_LOGO_PATH = path.join(__dirname, 'assets', 'pr-sons-logo.png');     // mark + PR SONS: the service report header
 const LETTERHEAD = {
   company: 'AQUIQ™',
   product: 'Water Monitoring Systems',
@@ -11,6 +12,14 @@ const LETTERHEAD = {
 };
 
 let logoBuf = null;
+let wideBuf = null;
+function logoWide() {
+  if (wideBuf === null) {
+    try { wideBuf = fs.readFileSync(WIDE_LOGO_PATH); } catch { wideBuf = false; }
+  }
+  return wideBuf || null;
+}
+
 function logo() {
   if (logoBuf === null) {
     try { logoBuf = fs.readFileSync(LOGO_PATH); } catch { logoBuf = false; }
@@ -31,6 +40,8 @@ function stampFooters(doc, stampText, leftText) {
       .text(`${LETTERHEAD.company}  |  ${LETTERHEAD.product}`, 40, height - 46, { width: w, align: 'center', lineBreak: false });
     doc.fillColor('#666666').font('Helvetica').fontSize(8)
       .text(LETTERHEAD.line, 40, height - 34, { width: w, align: 'center', lineBreak: false });
+    doc.fillColor('#666666').font('Courier').fontSize(8)
+      .text('Powered by PR SONS', 40, height - 22, { width: w, align: 'center', lineBreak: false });
     if (leftText) {
       doc.fillColor('#111111').fontSize(8.5)
         .text(leftText, 40, 16, { width: w / 2, lineBreak: false })
@@ -39,4 +50,4 @@ function stampFooters(doc, stampText, leftText) {
   }
 }
 
-module.exports = { LETTERHEAD, logo, stampFooters };
+module.exports = { LETTERHEAD, logo, logoWide, stampFooters };

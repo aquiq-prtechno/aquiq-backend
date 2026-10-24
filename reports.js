@@ -12,7 +12,7 @@
 
 const express = require('express');
 const { istParts, snapshotOf, mediaOf, PHOTO_BUCKET, ONLINE_WINDOW_MS } = require('./tickets');
-const { logo, stampFooters, LETTERHEAD } = require('./letterhead');
+const { logoWide, stampFooters, LETTERHEAD } = require('./letterhead');
 const fileLinks = require('./fileLinks');
 const { PARTS, CHECKLIST } = require('./fieldRules');
 
@@ -20,7 +20,7 @@ const REPORT_BUCKET = 'service-reports';
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const NA = 'Not available';
 
-// The same choices as the PR TECHNO FSR form.
+// The same choices as the AQUIQ FSR form.
 const OPTIONS = {
   overall_status: ['Working', 'Under Maintenance', 'Completed', 'Pending', 'Critical'],
   capacity: ['100/150 LPH', '200/250 LPH', '400/500 LPH', '1000 LPH', '2000 LPH', '5000 LPH', '10000 LPH'],
@@ -114,10 +114,10 @@ function renderPdf(report, images) {
     doc.on('error', reject);
     const W = doc.page.width - 80;
 
-    const lg = logo();
-    if (lg) { try { doc.image(lg, 40, 32, { fit: [58, 58] }); } catch { /* logo is optional */ } }
-    doc.fillColor(AMBER).font('Helvetica-Bold').fontSize(18).text('AQUIQ™', 108, 36);
-    doc.fillColor(INK).fontSize(24).text('SERVICE REPORT', 108, 62);
+    const lg = logoWide();
+    if (lg) { try { doc.image(lg, 40, 30, { fit: [150, 52] }); } catch { /* logo is optional */ } }
+    doc.fillColor(AMBER).font('Helvetica-Bold').fontSize(18).text('AQUIQ™', 205, 36);
+    doc.fillColor(INK).fontSize(22).text('SERVICE REPORT', 205, 63);
     doc.fillColor(MUTED).font('Helvetica').fontSize(10)
       .text(`FSR No: ${report.report_no}`, 40, 44, { width: W, align: 'right' })
       .text(`Ticket: ${report.ticket_no}`, 40, 58, { width: W, align: 'right' })

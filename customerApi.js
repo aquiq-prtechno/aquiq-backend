@@ -93,7 +93,7 @@ function createCustomerService(store, tickets, { now = () => new Date(), reports
 
     const since = now().getTime() - DAY_MS;
     if (recent.filter(t => new Date(t.created_at).getTime() >= since).length >= MAX_PER_DAY) {
-      throw httpError(429, 'You have reached today’s limit for service requests. Please call PR TECHNO support.');
+      throw httpError(429, 'You have reached today’s limit for service requests. Please call AQUIQ support.');
     }
 
     const category = clean(input.issue_category, 80) || 'Other';
