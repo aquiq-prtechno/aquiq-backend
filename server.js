@@ -27,7 +27,10 @@ const JOB_TIMEOUT_MS = 3 * 60 * 1000; // 3 minutes
 // /technician/accept, /webhook/blynk.
 // Starts in log-only mode; set ADMIN_AUTH_ENFORCE=true on Railway to enforce.
 const { createAdminAuth, ROLES } = require('./adminAuth');
-const adminAuth = createAdminAuth(supabase);
+const adminAuth = createAdminAuth(supabase, {
+  // who changed what (and what was refused): owner-only list at GET /admin/activity. Needs migrations/2026-10-27_admin_activity.sql
+  logActivity: async (entry) => { const { error } = await supabase.from('admin_activity').insert([entry]); if (error && error.code !== '42P01' && error.code !== 'PGRST205') console.warn('[ACTIVITY]', error.message); },
+});
 const ADMIN_URL = process.env.ADMIN_URL || 'https://aquiq-admin.vercel.app';
 app.use(['/admin', '/device', '/hardware-events', '/jobs', '/reports'], adminAuth.requireStaff);
 
@@ -1132,38 +1135,69 @@ function needServiceKey(res) {
   return true;
 }
 
-app.get('/admin/team', adminAuth.requireOwner, async (req, res) => {
+// Who am I? The panel uses this to show only what this person may use.
+app.get('/admin/me', (req, res) => {
+  if (!req.admin) return res.status(401).json({ error: 'Sign in required.' });
+  res.json({ id: req.admin.id, email: req.admin.email, role: req.admin.role, state: req.admin.state, perms: req.admin.perms, added_by_role: req.admin.added_by_role || null });
+});
+
+const { PERMS, STATES } = require('./adminAuth');
+const memberView = (u) => {
+  const meta = u.app_metadata || {};
+  const perms = {}; for (const k of PERMS) perms[k] = !!(meta.perms && meta.perms[k] === true);
+  const frozen = !!(u.banned_until && new Date(u.banned_until) > new Date());
+  return {
+    id: u.id, email: u.email, role: meta.role || null,
+    state: frozen ? 'frozen' : (meta.role === 'owner' ? 'active' : (STATES.includes(meta.state) ? meta.state : 'readonly')),
+    perms, disabled: frozen, added_by: meta.added_by || null, added_by_role: meta.added_by_role || null,
+    last_sign_in_at: u.last_sign_in_at || null, invited_at: u.invited_at || u.created_at || null,
+  };
+};
+const listMembers = async () => {
+  const { data, error } = await supabase.auth.admin.listUsers({ perPage: 200 });
+  if (error) throw new Error(error.message);
+  return (data.users || []).map(memberView);
+};
+
+// Owners see everyone. A Team (Emp) person with the "add team" right sees only the person they added.
+app.get('/admin/team', async (req, res) => {
+  if (!req.admin) return res.status(401).json({ error: 'Sign in required.' });
   if (needServiceKey(res)) return;
   try {
-    const { data, error } = await supabase.auth.admin.listUsers({ perPage: 200 });
-    if (error) return res.status(500).json({ error: error.message });
-    const members = (data.users || []).map(u => ({
-      id: u.id,
-      email: u.email,
-      role: u.app_metadata?.role || null,
-      disabled: !!(u.banned_until && new Date(u.banned_until) > new Date()),
-      last_sign_in_at: u.last_sign_in_at || null,
-    }));
-    res.json({ members });
+    const all = await listMembers();
+    if (req.admin.role === 'owner') return res.json({ members: all });
+    const mine = all.filter(m => m.added_by && m.added_by.id === req.admin.id);
+    res.json({ members: mine, limit: 1, used: mine.length });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-app.post('/admin/team/invite', adminAuth.requireOwner, async (req, res) => {
+app.post('/admin/team/invite', async (req, res) => {
+  if (!req.admin) return res.status(401).json({ error: 'Sign in required.' });
   if (needServiceKey(res)) return;
   try {
     const email = String(req.body.email || '').trim().toLowerCase();
-    const role = req.body.role || 'staff';
+    const isOwner = req.admin.role === 'owner';
+    const role = isOwner ? (req.body.role || 'staff') : 'staff';          // a Team (Emp) person can only ever add a Team (Emp) person
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'Enter a valid email address.' });
-    if (!ROLES.includes(role)) return res.status(400).json({ error: 'Role must be owner or staff.' });
+    if (!ROLES.includes(role)) return res.status(400).json({ error: 'Role must be owner or Team (Emp).' });
+    if (!isOwner) {
+      if (req.admin.added_by_role === 'staff') return res.status(403).json({ error: 'This is not available for your account.', code: 'not_available' });
+      const mine = (await listMembers()).filter(m => m.added_by && m.added_by.id === req.admin.id);
+      if (mine.length >= 1) return res.status(409).json({ error: 'You have already added your one team member.' });
+    }
 
     const { data, error } = await supabase.auth.admin.inviteUserByEmail(email, { redirectTo: ADMIN_URL });
     if (error) {
       const exists = /already|registered|exists/i.test(error.message);
       return res.status(exists ? 409 : 500).json({ error: exists ? 'That email already has an account.' : error.message });
     }
-    const { error: roleErr } = await supabase.auth.admin.updateUserById(data.user.id, { app_metadata: { role } });
+    // New Team (Emp) people start READ-ONLY with every right off; an owner switches things on.
+    const app_metadata = role === 'owner'
+      ? { role, added_by: { id: req.admin.id, email: req.admin.email }, added_by_role: req.admin.role }
+      : { role, state: 'readonly', perms: {}, added_by: { id: req.admin.id, email: req.admin.email }, added_by_role: req.admin.role };
+    const { error: roleErr } = await supabase.auth.admin.updateUserById(data.user.id, { app_metadata });
     if (roleErr) return res.status(500).json({ error: `Invite sent, but setting the role failed: ${roleErr.message}` });
 
     console.log(`[AUTH] ${req.admin.email} invited ${email} as ${role}`);
@@ -1173,19 +1207,58 @@ app.post('/admin/team/invite', adminAuth.requireOwner, async (req, res) => {
   }
 });
 
-app.post('/admin/team/:id/disable', adminAuth.requireOwner, async (req, res) => {
+// Owner only: set one Team (Emp) person to Active / Read-only / Frozen and switch their rights on or off.
+app.post('/admin/team/:id/access', async (req, res) => {
+  if (!req.admin || req.admin.role !== 'owner') return res.status(403).json({ error: 'This is not available for your account.', code: 'not_available' });
+  if (needServiceKey(res)) return;
+  try {
+    const { id } = req.params;
+    if (id === req.admin.id) return res.status(400).json({ error: 'You cannot change your own access.' });
+    const want = String(req.body.state || '');
+    if (![...STATES, 'frozen'].includes(want)) return res.status(400).json({ error: 'State must be active, readonly or frozen.' });
+    const { data: found, error: findErr } = await supabase.auth.admin.getUserById(id);
+    if (findErr || !found || !found.user) return res.status(404).json({ error: 'Person not found.' });
+    const meta = found.user.app_metadata || {};
+    if (meta.role !== 'staff') return res.status(400).json({ error: 'Owners are not limited. Only Team (Emp) people can be set here.' });
+
+    const perms = {};
+    for (const k of PERMS) perms[k] = !!(req.body.perms && req.body.perms[k] === true);
+    if (perms.add_team && meta.added_by_role === 'staff') perms.add_team = false;     // only people an owner added may add someone
+    const patch = { app_metadata: { state: want === 'frozen' ? (STATES.includes(meta.state) ? meta.state : 'readonly') : want, perms }, ban_duration: want === 'frozen' ? '876000h' : 'none' };
+    const { error } = await supabase.auth.admin.updateUserById(id, patch);
+    if (error) return res.status(500).json({ error: error.message });
+
+    console.log(`[AUTH] ${req.admin.email} set ${found.user.email} to ${want}`);
+    res.json({ success: true, member: memberView({ ...found.user, app_metadata: { ...meta, ...patch.app_metadata }, banned_until: want === 'frozen' ? new Date(Date.now() + 1e12).toISOString() : null }) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Owner only. Kept for the old screen: the new panel uses /access with state "frozen".
+app.post('/admin/team/:id/disable', async (req, res) => {
+  if (!req.admin || req.admin.role !== 'owner') return res.status(403).json({ error: 'This is not available for your account.', code: 'not_available' });
   if (needServiceKey(res)) return;
   try {
     const { id } = req.params;
     const disabled = !!req.body.disabled;
     if (id === req.admin.id) return res.status(400).json({ error: 'You cannot switch off your own account.' });
-
-    // A very long ban = switched off; 'none' lifts it. Their access token stops working at once.
     const { error } = await supabase.auth.admin.updateUserById(id, { ban_duration: disabled ? '876000h' : 'none' });
     if (error) return res.status(500).json({ error: error.message });
-
     console.log(`[AUTH] ${req.admin.email} ${disabled ? 'switched off' : 'restored'} user ${id}`);
     res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Owner only: the activity trail (what Team (Emp) people changed, and what was refused).
+app.get('/admin/activity', async (req, res) => {
+  if (!req.admin || req.admin.role !== 'owner') return res.status(403).json({ error: 'This is not available for your account.', code: 'not_available' });
+  try {
+    const { data, error } = await supabase.from('admin_activity').select('*').order('at', { ascending: false }).limit(Math.min(Number(req.query.limit) || 200, 500));
+    if (error) return res.status(error.code === '42P01' || error.code === 'PGRST205' ? 503 : 500).json({ error: error.code === '42P01' || error.code === 'PGRST205' ? 'The activity trail is not set up yet. Run migrations/2026-10-27_admin_activity.sql in Supabase.' : error.message });
+    res.json({ entries: data || [] });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
