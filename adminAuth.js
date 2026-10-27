@@ -101,7 +101,7 @@ function createAdminAuth(supabase, options = {}) {
   const MESSAGE = {
     missing_token: 'Sign in required.',
     invalid_token: 'Your session is not valid. Sign in again.',
-    disabled: 'This account has been switched off.',
+    disabled: 'This account is frozen by the owner.',
     no_role: 'This account has not been given access.',
     forbidden: 'Your role is not allowed to do this.',
     readonly: 'This account has read-only access.',
@@ -134,7 +134,7 @@ function createAdminAuth(supabase, options = {}) {
         return next();
       }
       console.warn(`[AUTH] blocked ${req.method} ${req.originalUrl} — ${reason}`);
-      return res.status(STATUS[reason] || 403).json({ error: MESSAGE[reason] || 'Not allowed.' });
+      return res.status(STATUS[reason] || 403).json({ error: MESSAGE[reason] || 'Not allowed.', code: reason });
     };
   }
 

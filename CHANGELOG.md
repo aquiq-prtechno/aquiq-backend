@@ -1,6 +1,9 @@
 # AQUIQ backend — release history
 Series: MAJOR.MINOR.PATCH. MINOR = new feature, PATCH = fix. Current version is also at `GET /version`.
 
+## 1.10.1 — 27 Oct 2026
+- A frozen account's admin request now answers 403 with code "disabled" so the admin panel can send the person back to sign in with the frozen message. Latest admin 1.7.2.
+
 ## 1.10.0 — 27 Oct 2026
 - Team (Emp) rights. adminAuth.js: each Team (Emp) person has a state (active / readonly; frozen = switched off) and per-right switches stored in Supabase app_metadata; the server decides every admin request (read-only = no changes; unlisted changes refused; owner-only team routes). New routes: GET /admin/me, POST /admin/team/:id/access (owner), GET /admin/activity (owner); invite rules: a Team (Emp) person may add one Team (Emp) member only, never an owner, and people they added may not add. New people start read-only with every right off. Every change and every refusal is written to admin_activity (SQL: migrations/2026-10-27_admin_activity.sql). Latest admin 1.7.0.
 
