@@ -1,6 +1,9 @@
 # AQUIQ backend — release history
 Series: MAJOR.MINOR.PATCH. MINOR = new feature, PATCH = fix. Current version is also at `GET /version`.
 
+## 1.10.3 — 28 Oct 2026
+- The log line for a refused no-reply sender now includes the mail relay's own answer, so the reason is visible.
+
 ## 1.10.2 — 28 Oct 2026
 - One look for every AQUIQ email: new mailLayout.js puts the logo, AQUIQ by PR SONS and a teal line on top and centres the body (Calibri 11). Applied to the request-received, delay, cancelled, reopened and ticket-closed mails, the login / confirmation / reset code mails and the test mail. The wording, subjects and the code-font footer are unchanged.
 - Admin sign-in mails now come from us, not the Supabase templates: new public POST /auth/forgot-password (same answer for any email, limited per email and per address) and the Team Access invite emails the link itself, both in the AQUIQ layout from no-reply@aquiq-prsons.com (name AQUIQ by PR SONS; MAIL_FROM_NOREPLY / MAIL_NAME_NOREPLY can change it; falls back to the accounts sender if the alias is refused). authMail.js. Latest admin 1.7.3.

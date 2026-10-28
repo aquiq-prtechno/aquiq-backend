@@ -43,7 +43,7 @@ async function sendAuthMail(mail, to) {
   if (!m.enabled) throw new Error('Mail is not set up on the server.');
   const from = m.senderFor('noreply');
   try { await m.send({ to, ...mail, from }); }
-  catch (e) { console.warn('[AUTHMAIL] no-reply sender failed, using the accounts sender:', e.message); await m.send({ to, ...mail, from: m.senderFor('accounts') }); }
+  catch (e) { console.warn('[AUTHMAIL] no-reply sender failed, using the accounts sender:', e.message, e.response && e.response.data ? JSON.stringify(e.response.data).slice(0, 300) : ''); await m.send({ to, ...mail, from: m.senderFor('accounts') }); }
 }
 app.post('/auth/forgot-password', async (req, res) => {
   const same = { success: true, message: 'If that email has an account, a reset link is on its way.' };
