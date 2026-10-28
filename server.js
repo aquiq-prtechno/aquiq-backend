@@ -32,6 +32,32 @@ const adminAuth = createAdminAuth(supabase, {
   logActivity: async (entry) => { const { error } = await supabase.from('admin_activity').insert([entry]); if (error && error.code !== '42P01' && error.code !== 'PGRST205') console.warn('[ACTIVITY]', error.message); },
 });
 const ADMIN_URL = process.env.ADMIN_URL || 'https://aquiq-admin.vercel.app';
+
+// Forgot password for the admin panel (public). We email the reset link ourselves, in the AQUIQ layout, from no-reply.
+// The answer is always the same, whether or not the email has an account, so nobody can probe which emails exist.
+const authMail = require('./authMail');
+const forgotPerEmail = authMail.createLimiter(3, 60 * 60 * 1000);
+const forgotPerIp = authMail.createLimiter(20, 60 * 60 * 1000);
+async function sendAuthMail(mail, to) {
+  const m = require('./reports').createMailer();
+  if (!m.enabled) throw new Error('Mail is not set up on the server.');
+  const from = m.senderFor('noreply');
+  try { await m.send({ to, ...mail, from }); }
+  catch (e) { console.warn('[AUTHMAIL] no-reply sender failed, using the accounts sender:', e.message); await m.send({ to, ...mail, from: m.senderFor('accounts') }); }
+}
+app.post('/auth/forgot-password', async (req, res) => {
+  const same = { success: true, message: 'If that email has an account, a reset link is on its way.' };
+  try {
+    const email = String((req.body && req.body.email) || '').trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !forgotPerEmail(email) || !forgotPerIp(req.ip || 'x')) return res.json(same);
+    if (!process.env.SUPABASE_SERVICE_KEY) return res.json(same);
+    const { data, error } = await supabase.auth.admin.generateLink({ type: 'recovery', email, options: { redirectTo: ADMIN_URL } });
+    const link = data && data.properties && data.properties.action_link;
+    if (!error && link) await sendAuthMail(authMail.resetMail({ email, link }), email);
+  } catch (e) { console.error('[AUTHMAIL] forgot-password:', e.message); }
+  res.json(same);
+});
+
 app.use(['/admin', '/device', '/hardware-events', '/jobs', '/reports'], adminAuth.requireStaff);
 
 
@@ -1188,10 +1214,16 @@ app.post('/admin/team/invite', async (req, res) => {
       if (mine.length >= 1) return res.status(409).json({ error: 'You have already added your one team member.' });
     }
 
-    const { data, error } = await supabase.auth.admin.inviteUserByEmail(email, { redirectTo: ADMIN_URL });
+    // the invite link is made here and emailed by us (AQUIQ layout, from no-reply) instead of by Supabase
+    const { data, error } = await supabase.auth.admin.generateLink({ type: 'invite', email, options: { redirectTo: ADMIN_URL } });
     if (error) {
       const exists = /already|registered|exists/i.test(error.message);
       return res.status(exists ? 409 : 500).json({ error: exists ? 'That email already has an account.' : error.message });
+    }
+    try { await sendAuthMail(require('./authMail').inviteMail({ email, link: data.properties.action_link }), email); }
+    catch (e) {
+      await supabase.auth.admin.deleteUser(data.user.id).catch(() => {});    // no half-made account if the email could not be sent
+      return res.status(502).json({ error: `The invite email could not be sent (${e.message}). Nothing was created, try again.` });
     }
     // New Team (Emp) people start READ-ONLY with every right off; an owner switches things on.
     const app_metadata = role === 'owner'
@@ -1355,7 +1387,7 @@ app.post('/admin/mail-test', express.json(), async (req, res) => {
   if (!sharedMailer.enabled) return res.status(503).json({ error: 'Mail is not set up on the server (MAIL_USER / MAIL_PASS are missing).', provider: sharedMailer.provider });
   const started = Date.now();
   try {
-    await sharedMailer.send({ to, subject: 'AQUIQ test email', text: 'This is a test email from the AQUIQ server. If you can read it, email sending works.\n\nAQUIQ Service Desk' });
+    await sharedMailer.send({ to, subject: 'AQUIQ test email', text: 'This is a test email from the AQUIQ server. If you can read it, email sending works.\n\nAQUIQ Service Desk', html: require('./mailLayout').simpleHtml(['This is a test email from the AQUIQ server. If you can read it, email sending works.', '<b>AQUIQ Service Desk</b>']) });
     res.json({ ok: true, provider: sharedMailer.provider, from: sharedMailer.from, ms: Date.now() - started });
   } catch (err) {
     const detail = (err.response && err.response.data && (err.response.data.error || err.response.data.message || JSON.stringify(err.response.data))) || err.message || String(err);

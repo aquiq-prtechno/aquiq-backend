@@ -1,4 +1,5 @@
 'use strict';
+const { simpleHtml } = require('./mailLayout');
 // Contact details of a customer account, edited from the customer app's Settings:
 //   - a store (UHSA, logs in with its mobile number) can add an email for service updates and reports;
 //   - a company account (UHAD) can add an email, or change its mobile number.
@@ -71,6 +72,7 @@ function createContactService(store, mailer, { now = () => new Date() } = {}) {
       from: mailer.senderFor ? mailer.senderFor('accounts') : undefined,
       to: sendTo, subject: 'Your AQUIQ confirmation code',
       text: `Your AQUIQ confirmation code is ${code}.\n\nIt works for 10 minutes. ${target === 'email' ? 'It confirms that this email address belongs to you, so AQUIQ can send you service updates and reports.' : 'It confirms the change of your mobile number.'}\n\nIf you did not ask for this, you can ignore this email.\n\nAQUIQ Service Desk`,
+      html: simpleHtml([`Your AQUIQ confirmation code is <b style="font-size:16pt;letter-spacing:3px">${code}</b>`, `It works for 10 minutes. ${target === 'email' ? 'It confirms that this email address belongs to you, so AQUIQ can send you service updates and reports.' : 'It confirms the change of your mobile number.'}`, 'If you did not ask for this, you can ignore this email.', '<b>AQUIQ Service Desk</b>']),
     });
     return { token: `${token}.${hash(code, token)}`, sent_to: sendTo.replace(/^(.).*(@.*)$/, '$1***$2') };
   }
@@ -111,6 +113,7 @@ function createContactService(store, mailer, { now = () => new Date() } = {}) {
         from: mailer.senderFor ? mailer.senderFor('accounts') : undefined,
         to: email, subject: 'Your AQUIQ login code',
         text: `Your AQUIQ login code is ${code}.\n\nIt works for 10 minutes. If you did not try to log in, you can ignore this email.\n\nAQUIQ Service Desk`,
+        html: simpleHtml([`Your AQUIQ login code is <b style="font-size:16pt;letter-spacing:3px">${code}</b>`, 'It works for 10 minutes. If you did not try to log in, you can ignore this email.', '<b>AQUIQ Service Desk</b>']),
       });
     }
     return { token: `${token}.${hash(code, token)}`, sent_to: email.replace(/^(.).*(@.*)$/, '$1***$2') };
@@ -168,6 +171,7 @@ function createContactService(store, mailer, { now = () => new Date() } = {}) {
         from: mailer.senderFor ? mailer.senderFor('accounts') : undefined,
         to: email, subject: 'Reset your AQUIQ password',
         text: `Your AQUIQ password reset code is ${code}.\n\nIt works for 10 minutes. Enter it in the app and choose a new password. If you did not ask for this, ignore this email; your password has not changed.\n\nAQUIQ Service Desk`,
+        html: simpleHtml([`Your AQUIQ password reset code is <b style="font-size:16pt;letter-spacing:3px">${code}</b>`, 'It works for 10 minutes. Enter it in the app and choose a new password. If you did not ask for this, ignore this email; your password has not changed.', '<b>AQUIQ Service Desk</b>']),
       });
     }
     return { token: `${token}.${hash(code, token)}`, sent_to: email.replace(/^(.).*(@.*)$/, '$1***$2') };

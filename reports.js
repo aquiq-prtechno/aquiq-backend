@@ -243,6 +243,8 @@ function createMailer(env = process.env, http = require('axios')) {
     tickets: { address: env.MAIL_FROM_TICKETS, name: env.MAIL_NAME_TICKETS || 'AQUIQ Service Desk' },
     reports: { address: env.MAIL_FROM_REPORTS, name: env.MAIL_NAME_REPORTS || 'AQUIQ Reports' },
     // login / confirmation / password-reset codes: sent from the reports address unless MAIL_FROM_ACCOUNTS says otherwise
+    // admin sign-in mails (invite, forgot password): always from the no-reply alias
+    noreply: { address: env.MAIL_FROM_NOREPLY || 'no-reply@aquiq-prsons.com', name: env.MAIL_NAME_NOREPLY || 'AQUIQ by PR SONS' },
     accounts: { address: env.MAIL_FROM_ACCOUNTS || env.MAIL_FROM_REPORTS, name: env.MAIL_NAME_ACCOUNTS || 'AQUIQ Service Desk' },
   };
   const senderFor = (kind) => { const s = senderCfg[kind]; return s && s.address ? { address: String(s.address).trim(), name: s.name } : null; };
@@ -320,18 +322,18 @@ function buildReportMail(t, row) {
     '--------------------------------------------------', CM.FOOTER_TEXT,
   ].join('\n');
   const esc = CM.esc;
-  const html = `<div style="font-family:Calibri,Arial,Helvetica,sans-serif;font-size:11pt;line-height:1.5;max-width:680px">
+  const html = require('./mailLayout').wrapHtml(`<div style="font-family:Calibri,Carlito,Arial,Helvetica,sans-serif;font-size:11pt;line-height:1.5">
 <p style="margin:0">Greetings of the day!</p>
 <p style="margin:0 0 22px"><b>AQUIQ by PR</b></p>
 <p style="margin:0 0 22px"><b>STATUS : SOLVED/CLOSED</b></p>
-<p style="margin:0 0 22px">Your service/complaint/installation &ldquo;${esc(shown)}&rdquo; has been closed with us via reference/ticket Id # <b><i><u>${esc(t.ticket_no)}</u></i></b></p>
+<p style="text-align:left;margin:0 0 22px">Your service/complaint/installation &ldquo;${esc(shown)}&rdquo; has been closed with us via reference/ticket Id # <b><i><u>${esc(t.ticket_no)}</u></i></b></p>
 <p style="margin:0 0 14px">Respected Sir/Ma&#39;am ${esc(name)},</p>
 <p style="margin:0 0 14px">The reported issue/request has been successfully completed and verified. No pending actions remain from the HELPDESK team. The ticket is hereby marked as <b>CLOSED</b>.</p>
 <p style="margin:0 0 22px">${p2}</p>
 <p style="margin:0 0 4px"><b>Regards,</b></p>
 <p style="margin:0"><b>AQUIQ by PR</b></p>
 ${CM.footerHtml()}
-</div>`;
+</div>`);
   return { subject, text, html };
 }
 
