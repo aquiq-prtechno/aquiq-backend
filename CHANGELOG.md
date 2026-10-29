@@ -1,6 +1,9 @@
 # AQUIQ backend — release history
 Series: MAJOR.MINOR.PATCH. MINOR = new feature, PATCH = fix. Current version is also at `GET /version`.
 
+## 1.10.4 — 29 Oct 2026
+- The admin sign-in mails (invite, forgot password) show the sender name noreply-aquiq (was AQUIQ by PR SONS). MAIL_NAME_NOREPLY can change it. Mail relay's RELAY_ALLOWED_FROM (Vercel, aquiq-admin) now lists no-reply@aquiq-prsons.com.
+
 ## 1.10.3 — 28 Oct 2026
 - The log line for a refused no-reply sender now includes the mail relay's own answer, so the reason is visible.
 

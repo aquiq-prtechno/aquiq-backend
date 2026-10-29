@@ -244,7 +244,7 @@ function createMailer(env = process.env, http = require('axios')) {
     reports: { address: env.MAIL_FROM_REPORTS, name: env.MAIL_NAME_REPORTS || 'AQUIQ Reports' },
     // login / confirmation / password-reset codes: sent from the reports address unless MAIL_FROM_ACCOUNTS says otherwise
     // admin sign-in mails (invite, forgot password): always from the no-reply alias
-    noreply: { address: env.MAIL_FROM_NOREPLY || 'no-reply@aquiq-prsons.com', name: env.MAIL_NAME_NOREPLY || 'AQUIQ by PR SONS' },
+    noreply: { address: env.MAIL_FROM_NOREPLY || 'no-reply@aquiq-prsons.com', name: env.MAIL_NAME_NOREPLY || 'noreply-aquiq' },
     accounts: { address: env.MAIL_FROM_ACCOUNTS || env.MAIL_FROM_REPORTS, name: env.MAIL_NAME_ACCOUNTS || 'AQUIQ Service Desk' },
   };
   const senderFor = (kind) => { const s = senderCfg[kind]; return s && s.address ? { address: String(s.address).trim(), name: s.name } : null; };
